@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+.venv/
+env/
+venv/
+
+# Streamlit
+.streamlit/cache/
+
+# Coqui TTS
+coqui_models/
+tts_models/
+tts_cache/
+
+# Transformers / HuggingFace
+transformers_cache/
+huggingface/
+hf_cache/
+
+# Node
+node_modules/
+
+# OS junk
+.DS_Store
+Thumbs.db
