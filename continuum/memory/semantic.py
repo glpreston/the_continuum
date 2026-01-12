@@ -1,14 +1,22 @@
+# continuum/memory/semantic.py
 """
 Semantic memory: stores stable facts about the user or system.
 Examples: preferences, long‑term goals, known facts.
 """
-
 from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
 from continuum.memory.memory_store import MemoryStore
+from sentence_transformers import SentenceTransformer
+import os
 
+# Use the fully-qualified, stable model name
+_model = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
+
+def embed(text: str):
+    emb = _model.encode(text)
+    return emb.tolist()
 
 @dataclass
 class SemanticMemory:

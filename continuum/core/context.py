@@ -43,3 +43,12 @@ class ContinuumContext:
 
     def history(self) -> List[Message]:
         return self.messages
+
+    def get_memory_summary(self) -> str:
+        """Return a compact summary of semantic memory, or empty string."""
+        if not hasattr(self, "memory") or not self.memory:
+            return ""
+        if hasattr(self.memory, "semantic") and self.memory.semantic:
+            keys = list(self.memory.semantic.keys())
+            return "Semantic memory keys: " + ", ".join(keys[:5])
+        return ""

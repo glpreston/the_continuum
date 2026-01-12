@@ -3,7 +3,7 @@ from continuum.persona.actor_cards import ACTOR_CARDS
 from continuum.persona.voiceprints import VOICEPRINTS
 from continuum.actors.utils import generate_voice_preview, generate_voice_audio
 from continuum.audio.tts_engine import CoquiEngine
-from continuum.persona.voice_speakers import ACTOR_SPEAKERS
+from continuum.persona.actor_speakers import ACTOR_SPEAKERS
 from continuum.persona.voice_emotion import ACTOR_EMOTION
 
 

@@ -1,9 +1,14 @@
 # continuum/actors/base_actor.py
 
-from abc import ABC, abstractmethod
+import io
+from abc import ABC
 from typing import Any, Dict, Optional
 
-from matplotlib import style
+import soundfile as sf
+
+from continuum.audio.tts_engine import tts_engine
+from continuum.persona.actor_speakers import ACTOR_SPEAKERS
+
 
 class BaseActor(ABC):
     """
@@ -20,18 +25,22 @@ class BaseActor(ABC):
     # ---------------------------------------------------------
     def propose(self, context, message: str) -> Dict[str, Any]:
         """
-        Default proposal logic.
-        Subclasses override this to provide specialized reasoning.
+        Phase 3: Unified proposal pipeline.
+        1. Generate reasoning steps
+        2. Convert steps into a proposal
+        3. Compute dynamic confidence
         """
+        steps = self.reason(context, message)
+        content = self.generate_proposal_from_steps(steps, message)
+        confidence = self.compute_confidence(steps)
+
         return {
             "actor": self.name,
-            "content": (
-                "I acknowledge the message, but I do not yet have "
-                "a specialized proposal."
-            ),
-            "confidence": 0.1,
+            "content": content,
+            "confidence": confidence,
+            "reasoning": steps,
             "metadata": {
-                "type": "default",
+                "type": "phase3",
                 "persona": self.persona,
             },
         }
@@ -51,15 +60,11 @@ class BaseActor(ABC):
     # OPTIONAL HOOKS
     # ---------------------------------------------------------
     def load_memory(self, memory_system):
-        """
-        Optional hook for actors that need memory access.
-        """
+        """Optional hook for actors that need memory access."""
         self.memory = memory_system
 
     def load_tools(self, tool_registry):
-        """
-        Optional hook for actors that need tool access.
-        """
+        """Optional hook for actors that need tool access."""
         self.tools = tool_registry
 
     def summarize_reasoning(self, proposal: dict) -> str:
@@ -69,11 +74,69 @@ class BaseActor(ABC):
         """
         persona = self.persona
 
-        style = persona.get("style", "general")
+        persona_style = persona.get("style", "general")
         goal = persona.get("goal", "provide helpful guidance")
-    
+
         return (
-            f"This proposal reflects the actor's style of {style}, "
+            f"This proposal reflects the actor's style of {persona_style}, "
             f"aimed at {goal}. It focuses on the key elements the actor "
             f"considers most relevant to the user's message."
         )
+
+    # ---------------------------------------------------------
+    # PHASE 3: MULTI-STEP REASONING FRAMEWORK
+    # ---------------------------------------------------------
+    def reason(self, context, message: str) -> list:
+        """
+        Multi-step reasoning chain.
+        Subclasses override this to express their cognitive style.
+        Default implementation provides a generic 3-step chain.
+        """
+        return [
+            "Step 1: Interpreting the user's intent.",
+            "Step 2: Identifying relevant knowledge or perspectives.",
+            "Step 3: Formulating a coherent response strategy."
+        ]
+
+    def generate_proposal_from_steps(self, steps: list, message: str) -> str:
+        """
+        Converts a reasoning chain into a final proposal.
+        Actors may override this for more expressive output.
+        """
+        joined = " ".join(steps)
+        return (
+            f"{joined} Final interpretation of the message: '{message}'."
+        )
+
+    def compute_confidence(self, steps: list) -> float:
+        """
+        Computes confidence dynamically based on reasoning depth.
+        Default: base confidence grows slightly with number of steps.
+        Actors may override for personality-specific scoring.
+        """
+        base = 0.70
+        bonus = min(len(steps) * 0.03, 0.15)  # cap bonus
+        return round(base + bonus, 3)        
+
+    # ---------------------------------------------------------
+    # AUDIO: actor-specific voice
+    # ---------------------------------------------------------
+    def speak(self, text: str):
+        """Generate audio for this actor using its assigned speaker."""
+        speaker = ACTOR_SPEAKERS.get(self.name, "p225")
+
+        # 1. Generate raw audio (numpy array or list)
+        wav_array = tts_engine.synthesize(
+            text,
+            speaker=speaker,
+            speed=1.0,
+            energy=1.0,
+            pitch=1.0,
+        )
+
+        # 2. Convert to WAV bytes for Streamlit
+        buffer = io.BytesIO()
+        sf.write(buffer, wav_array, 22050, format="WAV")
+        buffer.seek(0)
+
+        return buffer.read()

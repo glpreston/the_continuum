@@ -53,3 +53,37 @@ We removed:
 ```python
 with st.chat_message("user"): ...
 with st.chat_message("assistant"): ...
+
+
+Absolutely, George — I can package this cleanly so you can drop it straight into **ui-issue-chat-duplication.md** without touching anything else right now.  
+No fixes, no refactors — just a well‑formed issue entry you can paste into the existing file.
+
+Here’s the issue text, ready to insert:
+
+---
+
+## **ISSUE: Preview Voice Button Throws HiFiGAN `NoneType` Error**
+
+### **Summary**  
+Using the **Preview Voice (Audio)** button in the Actor Panel triggers a runtime error inside the TTS library (`hifigan_generator.py`). The error originates from the vocoder’s conditioning layer receiving `None` as input (`g = None`), causing `conv1d()` to fail.
+
+### **Observed Error**  
+```
+TypeError: conv1d() received an invalid combination of arguments - got (NoneType, Parameter, Parameter, ...)
+```
+
+### **Context**  
+- The main actor audio paths (`actor.speak()` and `speak_proposal`) work correctly.  
+- Only the **Preview Voice** button in the UI triggers this failure.  
+- This path appears to call `tts_engine.synthesize()` in a way that leads to `g = None` inside the HiFiGAN vocoder.  
+- This is a known upstream issue in certain TTS configurations.
+
+### **Impact**  
+- Preview Voice is currently non-functional.  
+- No impact on live actor audio during Senate or Meta‑Persona responses.  
+- No impact on Phase 3 reasoning or UI panels.
+
+### **Status**  
+- **Deferred**.  
+- Will be addressed after Phase 3 core milestones.  
+- Workaround: rely on actor-generated audio (which works) instead of Preview Voice.

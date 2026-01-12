@@ -51,4 +51,5 @@ def emotion_to_voice_modifiers(emotions: dict):
         blended["energy"] += (profile["energy"] - 1.0) * weight
         blended["pitch"]  += (profile["pitch"]  - 1.0) * weight
 
+    # print("EMOTION MOD:", blended)
     return blended

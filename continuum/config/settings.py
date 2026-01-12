@@ -1,3 +1,5 @@
+# community/config/settings.py
+
 """
 Continuum configuration settings.
 Defines model defaults and system‑level behavior flags.

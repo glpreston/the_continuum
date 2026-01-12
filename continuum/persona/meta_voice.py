@@ -17,5 +17,5 @@ def blend_emotion(weights, actor_emotions):
         blended["speed"] += emo.get("speed", 1.0) * (w / total)
         blended["energy"] += emo.get("energy", 1.0) * (w / total)
         blended["pitch"] += emo.get("pitch", 1.0) * (w / total)
-
+    
     return blended

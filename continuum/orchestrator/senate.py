@@ -1,6 +1,9 @@
+# continuum/orchestrator/senate.py
+
 from typing import List, Dict, Any
-import numpy as np
 from sklearn.feature_extraction.text import TfidfVectorizer
+from continuum.persona.topics import detect_topic, TOPIC_ACTOR_WEIGHTS
+
 
 
 class Senate:
@@ -16,23 +19,29 @@ class Senate:
     # COLLECT PROPOSALS
     # ---------------------------------------------------------
     def gather_proposals(self, context, message: str, controller) -> List[Dict[str, Any]]:
-        proposals = []
+        proposals: List[Dict[str, Any]] = []
 
         for actor in self.actors:
-
             # Skip disabled actors (J7)
             if not controller.actor_settings.get(actor.name, {}).get("enabled", True):
                 continue
 
             try:
+                # 1) Generate the proposal text + metadata
                 proposal = actor.propose(context, message)
 
-                # Apply actor weight (J7)
+                # 2) Apply actor weight (J7)
                 weight = controller.actor_settings.get(actor.name, {}).get("weight", 1.0)
                 proposal["confidence"] = proposal.get("confidence", 0) * weight
 
-                # J9 Layer 3: reasoning summary
+                # 3) J9 Layer 3: reasoning summary
                 proposal["summary"] = actor.summarize_reasoning(proposal)
+
+                # 4) Optional: attach audio if actor voice mode is enabled
+                if getattr(controller, "actor_voice_mode", False):
+                    if hasattr(actor, "speak_proposal"):
+                        proposal_audio = actor.speak_proposal(proposal["content"])
+                        proposal["audio"] = proposal_audio
 
                 proposals.append(proposal)
 
@@ -108,21 +117,34 @@ class Senate:
         3. Rank by confidence
         4. Compute similarity matrix (J11)
         5. Return the ranked list to the Jury
-        """
-
+        """        
         # 1. Gather proposals
         proposals = self.gather_proposals(context, message, controller)
-        controller.context.debug_flags["raw_proposals"] = proposals  # J9
+        controller.context.debug_flags["raw_proposals"] = proposals #J(9)
 
         # 2. Filter proposals
         filtered = self.filter_proposals(proposals)
-        controller.context.debug_flags["filtered_proposals"] = filtered  # J9
+        controller.context.debug_flags["filtered_proposals"] = filtered #J(9)
+
+        # ---------------------------------------------------------
+        # NEW: Topic detection + topic-aware confidence shaping
+        # ---------------------------------------------------------
+        topic = detect_topic(message)
+        topic_weights = TOPIC_ACTOR_WEIGHTS.get(topic, {})
+
+        for p in filtered:
+            actor = p.get("actor")
+            bias = topic_weights.get(actor, 1.0)
+            p["confidence"] *= bias
+
+        controller.context.debug_flags["topic"] = topic
+        controller.context.debug_flags["topic_weights"] = topic_weights
 
         # 3. Rank proposals
         ranked = self.rank_proposals(filtered)
 
-        # 4. J11: Similarity matrix
+        # 4. Similarity matrix
         similarity = self.compute_similarity_matrix(ranked)
         controller.context.debug_flags["similarity_matrix"] = similarity
 
-        return ranked
+        return ranked        
