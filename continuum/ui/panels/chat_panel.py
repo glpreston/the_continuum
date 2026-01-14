@@ -5,45 +5,35 @@ import streamlit as st
 def render_chat(controller):
     st.subheader("Chat")
 
-    # Initialize flag
-    if "pending_message" not in st.session_state:
-        st.session_state.pending_message = None
-
-    # Chat input
     user_input = st.chat_input("Say something to The Continuum...")
 
-    # If user submitted a message
     if user_input:
-        st.session_state.pending_message = user_input
+        controller.context.add_user_message(user_input)
+        controller.process_message(user_input)
         st.rerun()
+  
+    for m in controller.context.messages:
+        st.write(f"{m.role}: {m.content[:80]}")
 
-    # If we have a pending message, process it now
-    if st.session_state.pending_message:
-        msg = st.session_state.pending_message
-
-        # Add user message
-        controller.context.add_user_message(msg)
-
-        # Process through Senate → Jury → MetaPersona
-        response = controller.process_message(msg)
-
-        # Add assistant message
-        controller.context.add_assistant_message(response)
-
-        # Clear pending message
-        st.session_state.pending_message = None
-
-        # Rerun again to render updated history
-        st.rerun()
-
-    # ---------------------------------------------------------
-    # Normal render: show full conversation history (ALWAYS)
-    # ---------------------------------------------------------
     for i, msg in enumerate(controller.context.messages):
         with st.chat_message(msg.role):
             st.write(msg.content)
 
-            # Only assistant messages get the speech option
+            # -------------------------------------------------
+            # RAW ACTOR OUTPUT TOGGLE (NEW)
+            # -------------------------------------------------
+            if msg.role == "assistant":
+                if st.checkbox("Show raw actor output", key=f"raw_{i}"):
+                    if hasattr(controller, "last_final_proposal"):
+                        raw = controller.last_final_proposal.get("content", "")
+                        st.markdown("**Raw Actor Output:**")
+                        st.code(raw, language="markdown")
+                    else:
+                        st.info("No raw actor output available for this turn.")
+
+            # -------------------------------------------------
+            # META‑PERSONA SPEECH (your existing block)
+            # -------------------------------------------------
             if msg.role == "assistant":
                 from continuum.audio.meta_speech import speak_final_answer
 

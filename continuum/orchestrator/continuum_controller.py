@@ -34,6 +34,8 @@ class ContinuumController:
 
     def __init__(self, *args, **kwargs):
 
+        self.turn_history = []
+
         # Emotional memory
         self.emotional_memory = EmotionalMemory(max_events=20)
 
@@ -110,7 +112,7 @@ class ContinuumController:
             from transformers import pipeline
             self.emotion_model = pipeline(
                 "text-classification",
-                model="SamLowe/roberta-base-go-emotions",
+                model="SamLowe/roberta-base-go_emotions",
                 top_k=None,
             )
         return self.emotion_model
@@ -153,33 +155,30 @@ class ContinuumController:
     def process_message(self, message: str) -> str:
         """
         Full Continuum pipeline:
-        1. Update context
-        2. Detect emotion + store in EmotionalMemory
-        3. Senate gathers and ranks proposals
-        4. Jury selects the best proposal
-        5. Winning actor generates final response
+        1. Detect emotion + store in EmotionalMemory
+        2. Senate gathers and ranks proposals
+        3. Jury selects the best proposal
+        4. Winning actor generates final response
         """
 
-        # 1. Update context
-        self.context.add_user_message(message)
+        print("PROCESS_MESSAGE CALLED")
+
+        # ❌ IMPORTANT: Removed duplicate user-message add
+        # self.context.add_user_message(message)
 
         # 2. Detect emotion
         emotion_label = ""
         intensity = 0.0
 
         try:
-            # 1. Keyword override first
             override = self.keyword_emotion_override(message)
             if override:
                 emotion_label, intensity = override
             else:
-                # 2. Fall back to model
                 raw = self.get_emotion_model()(message)
                 top = raw[0][0]
                 emotion_label = top["label"]
                 intensity = top["score"]
-
-            print("DEBUG detected emotion:", emotion_label, intensity)
 
         except Exception as e:
             print("DEBUG emotion detection failed:", e)
@@ -206,17 +205,30 @@ class ContinuumController:
         actor = self.actors.get(actor_name)
 
         self.meta_persona.voice = self.persona_settings["voice"]
-        self.context.debug_flags["show_meta_persona"] = self.persona_settings[
-            "show_meta_persona"
-        ]
+        self.context.debug_flags["show_meta_persona"] = self.persona_settings["show_meta_persona"]
 
         if not actor:
             return "The Continuum encountered an error: unknown actor."
 
         final_text = actor.respond(self.context, final_proposal)
 
-        # Save assistant response
-        self.context.add_assistant_message(final_text)
+        # Meta-persona rewrite
+        rewritten = self.meta_persona.render(final_text, self.context)
 
-        # Meta-persona rendering
-        return self.meta_persona.render(final_text, self.context)
+        # Store the rewritten version (not the raw actor output)
+        self.context.add_assistant_message(rewritten)
+
+        # -----------------------------------------
+        # Store per-turn metadata for timeline
+        # -----------------------------------------
+        self.turn_history.append({
+            "user": message,
+            "emotion": {
+                "label": emotion_label,
+                "intensity": intensity
+            },
+            "final_proposal": final_proposal,
+            "assistant": rewritten
+        })
+
+        return ""

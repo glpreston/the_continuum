@@ -4,14 +4,18 @@ __pycache__/
 *.pyo
 *.pyd
 *.egg-info/
+*.egg
+build/
+dist/
 .venv/
 env/
 venv/
 
 # Streamlit
 .streamlit/cache/
+.streamlit/state/
 
-# Coqui TTS
+# Coqui TTS (legacy protection)
 coqui_models/
 tts_models/
 tts_cache/
@@ -24,6 +28,22 @@ hf_cache/
 # Node
 node_modules/
 
+# Logs
+*.log
+logs/
+
+# Editor settings
+.vscode/
+
+# Environment files
+.env
+.env.local
+
 # OS junk
 .DS_Store
 Thumbs.db
+desktop.ini
+
+[user]
+    name = glpreston
+    email = georgezpreston@gmail.com

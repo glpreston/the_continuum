@@ -31,7 +31,7 @@ class ContinuumContext:
 
     def add_assistant_message(self, content: str) -> None:
         self.add("assistant", content)
-
+        print("ADD_ASSISTANT_MESSAGE CALLED:", content[:50])
     # ---------------------------------------------------------
     # Accessors
     # ---------------------------------------------------------

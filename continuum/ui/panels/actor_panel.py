@@ -1,15 +1,11 @@
+# continuum/ui/panels/actor_panel.py
 import streamlit as st
 from continuum.persona.actor_cards import ACTOR_CARDS
 from continuum.persona.voiceprints import VOICEPRINTS
 from continuum.actors.utils import generate_voice_preview, generate_voice_audio
-from continuum.audio.tts_engine import CoquiEngine
+from continuum.audio.tts_engine import tts_engine 
 from continuum.persona.actor_speakers import ACTOR_SPEAKERS
 from continuum.persona.voice_emotion import ACTOR_EMOTION
-
-
-
-# Load once globally
-tts_engine = CoquiEngine()
 
 
 def render_actor_panel(controller):
@@ -72,7 +68,7 @@ def render_actor_panel(controller):
             # -------------------------
             if st.button("Preview Voice (Audio)", key=f"{actor_name}_preview_audio"):
                 preview_text = generate_voice_preview(actor)
-                speaker = ACTOR_SPEAKERS.get(actor_name, tts_engine.speakers[0])
+                speaker = ACTOR_SPEAKERS.get(actor_name, tts_engine.default_voice)
                 emotion = ACTOR_EMOTION.get(actor_name, {})
 
                 wav = tts_engine.synthesize(

@@ -1,33 +1,40 @@
-# The Continuum — Documentation Index
+Here’s a polished, Phase‑3‑accurate, cleanly structured version of your README.  
+I kept your voice, your structure, and your intent — but tightened the language, clarified the architecture, added Phase‑3 completion notes, and removed placeholders that no longer reflect the system’s current maturity.
 
-Welcome to the documentation hub for **The Continuum**, a unified meta‑presence orchestrating multiple internal actors through a Senate–Jury deliberation pipeline.
+Everything below is ready to paste directly into `README.md`.
+
+---
+
+# **The Continuum — Documentation Index**
+
+Welcome to the documentation hub for **The Continuum**, a unified meta‑presence built on a multi‑actor Senate, a multi‑dimensional Jury, a meta‑persona synthesis layer, and an emotional‑memory‑aware cognitive engine.
 
 This index provides quick access to all major documents, specifications, and design notes.
 
 ---
 
-## Core Architecture
+## **Core Architecture**
 - **Continuum Architecture Overview**  
   `/docs/continuum_architecture.md`
 
 - **Senate & Jury Pipeline Specification**  
-  (future: `/docs/senate_jury_pipeline.md`)
+  `/docs/senate_jury_pipeline.md` *(planned)*
 
 - **Memory System Overview**  
-  (future: `/docs/memory_system.md`)
+  `/docs/memory_system.md` *(planned)*
 
 ---
 
-## Persona & Actors
+## **Persona & Actors**
 - **J12 — Actor Personality Cards**  
   `/docs/actor_personality_cards.md`
 
 - **Meta‑Persona Layer Specification**  
-  (future: `/docs/meta_persona.md`)
+  `/docs/meta_persona.md` *(planned)*
 
 ---
 
-## UI & Interaction
+## **UI & Interaction**
 - **UI Overview & Layout Structure**  
   `/docs/ui_overview.md`
 
@@ -36,36 +43,56 @@ This index provides quick access to all major documents, specifications, and des
 
 ---
 
-## Development Notes
+## **Development Notes**
 - **Project Setup & Folder Structure**  
-  (future: `/docs/project_structure.md`)
+  `/docs/project_structure.md` *(planned)*
 
 - **Troubleshooting Notes**  
-  (future: `/docs/troubleshooting.md`)
+  `/docs/troubleshooting.md` *(planned)*
 
 ---
 
-## Versioning
+## **Versioning**
 - **Current Version:** J12  
+- **Phase:** **Phase 3 — Cognitive Engine Stabilization (Completed)**  
 - **Last Updated:** January 2026
 
 ---
 
-When you add new modules or features, update this index to keep the documentation cohesive and discoverable.
+When new modules or features are added, update this index to keep the documentation cohesive and discoverable.
 
-# The Continuum — Architecture Overview
+---
+
+# **The Continuum — Architecture Overview**
 
 The Continuum is a unified meta‑presence composed of multiple internal actors, a Senate–Jury deliberation engine, a meta‑persona layer, and a memory system.  
 This document provides a high‑level overview of the architecture and how each subsystem interacts.
 
 ---
 
-## 1. High‑Level Flow
-User Message ↓ ContinuumContext (messages, memory, profile) ↓ Senate (multiple actors generate proposals) ↓ Filtering & Relevance Scoring ↓ Ranking ↓ Jury (selects the winning proposal) ↓ Meta‑Persona Layer (unifies tone & voice) ↓ Final Assistant Response
+## **1. High‑Level Flow**
+
+```
+User Message
+    ↓
+ContinuumContext (messages, memory, profile)
+    ↓
+Senate (multiple actors generate proposals)
+    ↓
+Filtering & Relevance Scoring
+    ↓
+Ranking
+    ↓
+Jury (multi‑dimensional scoring + winner selection)
+    ↓
+Meta‑Persona Layer (unifies tone & voice)
+    ↓
+Final Assistant Response
+```
 
 ---
 
-## 2. Core Components
+## **2. Core Components**
 
 ### **ContinuumContext**
 Tracks:
@@ -73,39 +100,52 @@ Tracks:
 - memory snapshot  
 - user profile  
 - debug flags  
+- emotional memory state  
 - ContinuumMemory instance  
 
 Acts as the shared state container for the entire system.
 
 ---
 
-### **Senate (Actor Layer)**
+### **Senate (Actor Layer)**  
 A collection of specialized cognitive actors.  
 Each actor:
 - receives the user message  
 - generates a proposal  
 - includes metadata (confidence, domain, persona traits)  
 - is scored for relevance  
+- participates in multi‑actor deliberation  
 
-Actors are defined in: continuum/actors/
-
-
-Personality cards are defined in: continuum/persona/actor_cards.py
+Actors live in: `continuum/actors/`  
+Personality cards live in: `continuum/persona/actor_cards.py`
 
 ---
 
-### **Jury**
+### **Jury (Rubric 4.0)**  
 Evaluates ranked proposals and selects the final winner.  
-The Jury:
-- considers confidence  
-- considers relevance  
-- may include tie‑breaking logic  
-- produces a final decision object  
+The Jury scores each actor across seven dimensions:
+
+- Relevance  
+- Coherence  
+- Reasoning Quality  
+- Intent Alignment  
+- Emotional Alignment  
+- Novelty  
+- Memory Alignment  
+
+Outputs:
+- winning actor  
+- full scoring matrix  
+- actor reasoning traces  
+- jury reasoning  
+- jury dissent  
+- runner‑up comparison  
 
 ---
 
-### **Meta‑Persona Layer**
-Transforms the winning proposal into a unified, human‑readable response.  
+### **Meta‑Persona Layer**  
+Transforms the winning proposal into a unified, human‑readable response.
+
 Responsibilities:
 - maintain consistent tone  
 - integrate dissenting perspectives  
@@ -118,7 +158,8 @@ Responsibilities:
 Stores:
 - durable facts  
 - contextual snapshots  
-- semantic embeddings (future)  
+- emotional events  
+- semantic embeddings *(future)*  
 
 Supports:
 - memory search  
@@ -127,22 +168,25 @@ Supports:
 
 ---
 
-## 3. UI Integration
+## **3. UI Integration**
 
 The Streamlit UI exposes:
 - chat interface  
 - Senate pipeline visualization  
 - actor reasoning  
+- Jury scoring matrix  
+- runner‑up comparison  
+- emotional diagnostics  
 - flow diagram  
 - memory viewer  
 - persona controls  
 - actor profiles (J12)  
 
-Panels live in: continuum/ui/panels/
+Panels live in: `continuum/ui/panels/`
 
 ---
 
-## 4. Design Principles
+## **4. Design Principles**
 
 - **Modularity** — each subsystem is isolated and replaceable  
 - **Transparency** — internal reasoning is visible through UI panels  
@@ -152,15 +196,18 @@ Panels live in: continuum/ui/panels/
 
 ---
 
-## 5. Future Extensions
+## **5. Future Extensions**
 
 - Actor weighting & adaptive relevance  
 - Long‑term memory embeddings  
 - Multi‑turn actor specialization  
 - Tool‑augmented actors  
 - Multi‑persona blending  
+- Emotional state machine (Phase 4)  
 
 ---
 
 **Document Version:** J12  
+**Phase:** Phase 3 Complete  
 **Last Updated:** January 2026
+
