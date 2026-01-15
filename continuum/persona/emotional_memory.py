@@ -1,121 +1,299 @@
-# continuum/persona/emotional_memory.py
+#  continuum/persona/emotional_memory.py
 
-from collections import deque
+from __future__ import annotations
+
+from dataclasses import dataclass, asdict
+from typing import Dict, List, Optional, Any
+from math import sqrt
+from continuum.emotion.emotional_memory_decay import update_emotional_memory
+import datetime
+
+
+# ---------------------------------------------------------------------------
+# EI‑2.0 Emotional Event
+# ---------------------------------------------------------------------------
+
+@dataclass
+class EmotionalEvent:
+    """
+    EI‑2.0 emotional memory event.
+
+    - timestamp: ISO 8601 string
+    - raw_state: dict of EI‑2.0 emotion dimensions -> float
+    - dominant_emotion: label for the dominant emotion at this moment
+    - metadata: optional contextual info (speaker, turn_id, source, etc.)
+    """
+    timestamp: str
+    raw_state: Dict[str, float]
+    dominant_emotion: str
+    metadata: Optional[Dict[str, Any]] = None
+
+
+# ---------------------------------------------------------------------------
+# EI‑2.0 Emotional Memory
+# ---------------------------------------------------------------------------
 
 class EmotionalMemory:
     """
-    Tracks recent emotional context over the conversation.
-    Stores rolling emotion_label + intensity events and exposes
-    a smoothed emotional state for downstream systems.
+    EI‑2.0 EmotionalMemory
+
+    Tracks:
+    - short_term_emotion: most recent dominant emotion
+    - long_term_emotion: dominant emotion derived from smoothed state
+    - smoothed_state: exponentially smoothed EI‑2.0 dimensions
+    - volatility: magnitude of recent emotional change
+    - confidence: inverse of volatility, normalized
+    - events: rolling list of EmotionalEvent objects
     """
 
-    def __init__(self, max_events: int = 20):
-        self.max_events = max_events
-        self.events = deque(maxlen=max_events)
+    def __init__(
+        self,
+        smoothing_factor: float = 0.3,
+        max_events: int = 200,
+        min_confidence: float = 0.0,
+        max_confidence: float = 1.0,
+        volatility_normalization: float = 5.0,
+    ) -> None:
 
-    def add_event(self, emotion_label: str, intensity: float):
+        self.smoothing_factor = smoothing_factor
+        self.max_events = max_events
+        self.min_confidence = min_confidence
+        self.max_confidence = max_confidence
+        self.volatility_normalization = volatility_normalization
+
+        self.events: List[EmotionalEvent] = []
+        self.smoothed_state: Dict[str, float] = {}
+        self.previous_smoothed_state: Optional[Dict[str, float]] = None
+
+        self.short_term_emotion: Optional[str] = None
+        self.long_term_emotion: Optional[str] = None
+        self.volatility: float = 0.0
+        self.confidence: float = max_confidence
+
+        # Step F‑3: Track last update time for decay
+        self.last_update_ts = datetime.datetime.utcnow().timestamp()
+
+    # -----------------------------------------------------------------------
+    # Core update pipeline
+    # -----------------------------------------------------------------------
+
+    def add_event(
+        self,
+        raw_state: Dict[str, float],
+        dominant_emotion: str,
+        timestamp: Optional[datetime.datetime] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> None:
+
+        if timestamp is None:
+            timestamp = datetime.datetime.utcnow()
+
+        event = EmotionalEvent(
+            timestamp=timestamp.isoformat(),
+            raw_state=dict(raw_state),
+            dominant_emotion=dominant_emotion,
+            metadata=metadata or {},
+        )
+
+        self.events.append(event)
+        if len(self.events) > self.max_events:
+            self.events.pop(0)
+
+        self.short_term_emotion = dominant_emotion
+
+        # Update smoothed state + metrics
+        self._update_smoothed_state(raw_state)
+        self._update_volatility()
+        self._update_confidence()
+        self._update_long_term_emotion()
+
+        # Step F‑3: Apply emotional decay + recovery
+        self._apply_decay_and_recovery()
+
+        # Update timestamp
+        self.last_update_ts = datetime.datetime.utcnow().timestamp()
+
+    # -----------------------------------------------------------------------
+    # Step F‑3: Emotional Decay + Recovery
+    # -----------------------------------------------------------------------
+
+    def _apply_decay_and_recovery(self):
         """
-        Store a simple emotional event.
+        Applies exponential decay + gentle recovery to the smoothed emotional state.
+        This keeps emotional memory realistic and prevents long-term buildup.
         """
-        if not emotion_label:
+        if not self.smoothed_state:
             return
 
-        self.events.append({
-            "emotion_label": emotion_label,
-            "intensity": intensity
-        })
+        # Convert smoothed_state to a simple dict for decay module
+        decayed = update_emotional_memory(
+            memory_state=self.smoothed_state,
+            last_update_ts=self.last_update_ts,
+            half_life_seconds=180.0,   # 3-minute half-life
+            recovery_rate=0.02         # gentle recovery
+        )
 
-    def is_empty(self) -> bool:
-        return len(self.events) == 0
+        self.smoothed_state = decayed
 
-    def get_last_emotion(self) -> str:
-        """
-        Return the most recent detected emotion label, or empty string.
-        """
-        if not self.events:
-            return ""
-        return self.events[-1]["emotion_label"]
+    # -----------------------------------------------------------------------
+    # Smoothing
+    # -----------------------------------------------------------------------
 
-    def get_smoothed_emotion(self) -> str:
-        """
-        Weighted smoothing over the last 10 emotional events.
-        Most recent events have higher weight.
-        """
-        if not self.events:
-            return ""
+    def _update_smoothed_state(self, raw_state: Dict[str, float]) -> None:
+        alpha = self.smoothing_factor
 
-        # Convert deque → list so slicing works
-        recent = list(self.events)[-10:]
-        recent = list(reversed(recent))  # newest first
+        if not self.smoothed_state:
+            self.smoothed_state = dict(raw_state)
+            self.previous_smoothed_state = None
+            return
 
-        weights = []
-        emotions = []
+        self.previous_smoothed_state = dict(self.smoothed_state)
 
-        for i, event in enumerate(recent):
-            weight = 1.0 / (i + 1)  # 1.0, 0.5, 0.33...
-            weights.append(weight)
-            emotions.append((event["emotion_label"], event["intensity"]))
+        for dim, value in raw_state.items():
+            prev = self.smoothed_state.get(dim, value)
+            self.smoothed_state[dim] = alpha * value + (1.0 - alpha) * prev
 
-        # Aggregate weighted scores
-        scores = {}
-        for (label, intensity), w in zip(emotions, weights):
-            scores[label] = scores.get(label, 0) + intensity * w
+        # Decay missing dimensions
+        for dim in list(self.smoothed_state.keys()):
+            if dim not in raw_state:
+                prev = self.smoothed_state[dim]
+                self.smoothed_state[dim] = (1.0 - alpha) * prev
 
-        if not scores:
-            return ""
+    # -----------------------------------------------------------------------
+    # Volatility + Confidence
+    # -----------------------------------------------------------------------
 
-        return max(scores, key=scores.get)
+    def _update_volatility(self) -> None:
+        if self.previous_smoothed_state is None:
+            self.volatility = 0.0
+            return
 
-    def get_emotional_state(self) -> str:
-        """
-        Returns the best emotional summary for downstream systems.
-        """
-        smoothed = self.get_smoothed_emotion()
-        if smoothed:
-            return smoothed
-        return self.get_last_emotion()
+        dims = set(self.smoothed_state.keys()) | set(self.previous_smoothed_state.keys())
+        squared_sum = 0.0
 
-    def get_smoothed_state(self):
-        """
-        Backwards‑compatible method for the UI.
-        Supports both old-style events (sentiment + emotions dict)
-        and new-style events (emotion_label + intensity).
-        """
+        for dim in dims:
+            current = self.smoothed_state.get(dim, 0.0)
+            previous = self.previous_smoothed_state.get(dim, 0.0)
+            diff = current - previous
+            squared_sum += diff * diff
 
-        if not self.events:
-            return {
-                "avg_sentiment": 0.0,
-                "avg_emotions": {},
-            }
+        self.volatility = sqrt(squared_sum)
 
-        # If events use the NEW format (emotion_label + intensity)
-        if "emotion_label" in self.events[0]:
-            # Convert new format into old-style aggregates
-            avg_sentiment = sum(e["intensity"] for e in self.events) / len(self.events)
+    def _update_confidence(self) -> None:
+        if self.volatility_normalization <= 0:
+            self.confidence = self.max_confidence
+            return
 
-            emotion_sums = {}
-            for e in self.events:
-                label = e["emotion_label"]
-                emotion_sums[label] = emotion_sums.get(label, 0.0) + e["intensity"]
+        normalized_vol = self.volatility / self.volatility_normalization
+        base_conf = 1.0 / (1.0 + normalized_vol)
 
-            avg_emotions = {k: v / len(self.events) for k, v in emotion_sums.items()}
+        span = self.max_confidence - self.min_confidence
+        self.confidence = self.min_confidence + span * base_conf
 
-            return {
-                "avg_sentiment": avg_sentiment,
-                "avg_emotions": avg_emotions,
-            }
+    # -----------------------------------------------------------------------
+    # Long-term emotion
+    # -----------------------------------------------------------------------
 
-        # Otherwise fall back to OLD format
-        avg_sentiment = sum(e["sentiment"] for e in self.events) / len(self.events)
+    def _update_long_term_emotion(self) -> None:
+        if not self.smoothed_state:
+            self.long_term_emotion = None
+            return
 
-        emotion_sums = {}
-        for e in self.events:
-            for k, v in e["emotions"].items():
-                emotion_sums[k] = emotion_sums.get(k, 0.0) + v
+        self.long_term_emotion = max(self.smoothed_state.items(), key=lambda kv: kv[1])[0]
 
-        avg_emotions = {k: v / len(self.events) for k, v in emotion_sums.items()}
+    # -----------------------------------------------------------------------
+    # Debug payload
+    # -----------------------------------------------------------------------
+
+    def get_debug_payload(self, last_n: int = 5) -> Dict[str, Any]:
+        last_events = self.events[-last_n:]
+        trend = self._compute_trend()
 
         return {
-            "avg_sentiment": avg_sentiment,
-            "avg_emotions": avg_emotions,
+            "last_events": [asdict(e) for e in last_events],
+            "smoothed_state": dict(self.smoothed_state),
+            "volatility": self.volatility,
+            "confidence": self.confidence,
+            "short_term_emotion": self.short_term_emotion,
+            "long_term_emotion": self.long_term_emotion,
+            "trend": trend,
+        }
+
+    def _compute_trend(self) -> Dict[str, str]:
+        if self.previous_smoothed_state is None:
+            return {dim: "stable" for dim in self.smoothed_state.keys()}
+
+        trend: Dict[str, str] = {}
+        dims = set(self.smoothed_state.keys()) | set(self.previous_smoothed_state.keys())
+
+        for dim in dims:
+            current = self.smoothed_state.get(dim, 0.0)
+            previous = self.previous_smoothed_state.get(dim, 0.0)
+            diff = current - previous
+
+            if abs(diff) < 1e-6:
+                trend[dim] = "stable"
+            elif diff > 0:
+                trend[dim] = "rising"
+            else:
+                trend[dim] = "falling"
+
+        return trend
+
+    # -----------------------------------------------------------------------
+    # Legacy migration (EI‑1.0 → EI‑2.0)
+    # -----------------------------------------------------------------------
+
+    @classmethod
+    def from_legacy(
+        cls,
+        legacy_data: Dict[str, Any],
+        mapping_fn: Optional[Any] = None,
+        **kwargs: Any,
+    ) -> "EmotionalMemory":
+
+        memory = cls(**kwargs)
+        events = legacy_data.get("events", [])
+
+        for legacy_event in events:
+            if mapping_fn is not None:
+                raw_state, dominant_emotion = mapping_fn(legacy_event)
+            else:
+                legacy_emotions = legacy_event.get("emotions", {})
+                raw_state = dict(legacy_emotions)
+                dominant_emotion = (
+                    max(legacy_emotions.items(), key=lambda kv: kv[1])[0]
+                    if legacy_emotions else "neutral"
+                )
+
+            ts_raw = legacy_event.get("timestamp")
+            if isinstance(ts_raw, str):
+                try:
+                    ts = datetime.datetime.fromisoformat(ts_raw)
+                except Exception:
+                    ts = datetime.datetime.utcnow()
+            elif isinstance(ts_raw, datetime.datetime):
+                ts = ts_raw
+            else:
+                ts = datetime.datetime.utcnow()
+
+            metadata = legacy_event.get("metadata", {})
+            memory.add_event(raw_state=raw_state, dominant_emotion=dominant_emotion, timestamp=ts, metadata=metadata)
+
+        return memory
+
+    # -----------------------------------------------------------------------
+    # Backwards‑compatible UI method
+    # -----------------------------------------------------------------------
+
+    def get_smoothed_state(self) -> Dict[str, Any]:
+        """
+        Backwards‑compatible method for the UI.
+        Returns EI‑2.0 smoothed state in a stable structure.
+        """
+        return {
+            "smoothed_state": dict(self.smoothed_state),
+            "dominant_emotion": self.long_term_emotion,
+            "confidence": self.confidence,
+            "volatility": self.volatility,
         }

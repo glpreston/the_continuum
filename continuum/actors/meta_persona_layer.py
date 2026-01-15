@@ -1,3 +1,4 @@
+# continuum/actors/meta_persona_layer.py
 """
 Meta‑persona blending layer.
 Transforms actor proposals into a unified stylistic tone

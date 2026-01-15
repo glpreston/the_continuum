@@ -1,4 +1,5 @@
 # continuum/ui/panels/emotional_memory_panel.py
+# version EI‑2.0
 
 import streamlit as st
 
@@ -11,23 +12,35 @@ def render_emotional_memory(controller):
 
     memory = controller.emotional_memory
 
-    if memory.is_empty():
-        st.caption("No emotional history yet.")
+    if not memory.events:
+        st.info("No emotional events recorded yet.")
         return
 
     state = memory.get_smoothed_state()
 
-    # Display averaged sentiment
-    st.markdown("### Smoothed Sentiment")
-    st.write(f"**Average Sentiment Polarity:** {state['avg_sentiment']:.3f}")
+    dominant = state.get("dominant_emotion", "unknown")
+    confidence = state.get("confidence", 0.0)
+    volatility = state.get("volatility", 0.0)
+    smoothed = state.get("smoothed_state", {})
 
-    # Display averaged emotions
-    st.markdown("### Smoothed Emotions")
-    st.json(state["avg_emotions"])
+    # EI‑2.0 summary
+    st.markdown("### EI‑2.0 Emotional Summary")
+    st.write(f"**Dominant Emotion:** {dominant}")
+    st.write(f"**Confidence:** {confidence:.3f}")
+    st.write(f"**Volatility:** {volatility:.3f}")
 
-    # Optional: show raw events
+    # Smoothed vector
+    st.markdown("### Smoothed Emotional State")
+    st.json(smoothed)
+
+    # Phase‑4 emotional state (if available)
+    if hasattr(controller, "emotional_state") and controller.emotional_state:
+        st.markdown("### Phase‑4 Emotional State (Debug)")
+        st.json(controller.emotional_state.as_dict())
+
+    # Raw events
     with st.expander("Raw Emotional Events (debug)"):
-        st.write(list(memory.events))
+        st.json([e.__dict__ for e in memory.events])
 
     # Reset button
     if st.button("Reset Emotional Memory"):

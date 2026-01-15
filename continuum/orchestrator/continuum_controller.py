@@ -1,4 +1,5 @@
 # continuum/orchestrator/continuum_controller.py
+# updated for ei 2.0
 
 import uuid
 from typing import Any, List
@@ -8,6 +9,8 @@ from .senate import Senate
 from .jury import Jury
 from continuum.tools.tool_registry import ToolRegistry
 from continuum.persona.meta_persona import MetaPersona
+import inspect
+print("MetaPersona loaded from:", inspect.getfile(MetaPersona))
 
 # Senate actors
 from continuum.actors.senate_architect import SenateArchitect
@@ -20,6 +23,10 @@ from continuum.persona.emotional_memory import EmotionalMemory
 
 # Semantic embedding for Jury emotional alignment
 from continuum.memory.semantic import embed as get_embedding
+
+# Phase 4 emotional engine
+from continuum.emotion.mappings import build_delta_from_labels
+from continuum.emotion.state_machine import update_emotional_state, EmotionalState
 
 
 class ContinuumController:
@@ -38,6 +45,9 @@ class ContinuumController:
 
         # Emotional memory
         self.emotional_memory = EmotionalMemory(max_events=20)
+
+        # Phase 4: persistent emotional state
+        self.emotional_state = EmotionalState()
 
         # Lazy-loaded emotion model (initialized on first use)
         self.emotion_model = None
@@ -156,48 +166,87 @@ class ContinuumController:
         """
         Full Continuum pipeline:
         1. Detect emotion + store in EmotionalMemory
-        2. Senate gathers and ranks proposals
-        3. Jury selects the best proposal
-        4. Winning actor generates final response
+        2. Update Phase 4 Emotional State
+        3. Senate gathers and ranks proposals
+        4. Jury selects the best proposal
+        5. Winning actor generates final response
         """
 
         print("PROCESS_MESSAGE CALLED")
 
-        # ❌ IMPORTANT: Removed duplicate user-message add
-        # self.context.add_user_message(message)
-
-        # 2. Detect emotion
-        emotion_label = ""
+        # ---------------------------------------------------------
+        # 1. Detect emotion (EI‑2.0 format)
+        # ---------------------------------------------------------
+        raw_state = {}
+        dominant_emotion = ""
         intensity = 0.0
 
         try:
+            # Keyword override first
             override = self.keyword_emotion_override(message)
             if override:
-                emotion_label, intensity = override
+                label, score = override
+                raw_state = {label: score}
+                dominant_emotion = label
+                intensity = score
+
             else:
-                raw = self.get_emotion_model()(message)
-                top = raw[0][0]
-                emotion_label = top["label"]
-                intensity = top["score"]
+                # Transformer model output
+                raw = self.get_emotion_model()(message)[0]
+
+                # Convert to EI‑2.0 dimension dict
+                raw_state = {entry["label"]: entry["score"] for entry in raw}
+
+                # Dominant emotion
+                dominant_emotion = max(raw_state, key=raw_state.get)
+                intensity = raw_state[dominant_emotion]
 
         except Exception as e:
             print("DEBUG emotion detection failed:", e)
+            raw_state = {"neutral": 0.0}
+            dominant_emotion = "neutral"
+            intensity = 0.0
 
-        # Store in EmotionalMemory
-        self.emotional_memory.add_event(emotion_label, intensity)
-        print("DEBUG EmotionalMemory.add_event:", emotion_label, intensity)
+        # ---------------------------------------------------------
+        # Store EI‑2.0 emotional event
+        # ---------------------------------------------------------
+        self.emotional_memory.add_event(
+            raw_state=raw_state,
+            dominant_emotion=dominant_emotion,
+            metadata={"source": "model"},
+        )
 
+        # ---------------------------------------------------------
+        # 2. Phase 4 Emotional State Machine Update
+        # ---------------------------------------------------------
+
+        # Optional: reset emotional state for testing (neutral baseline)
+        if self.context.debug_flags.get("reset_emotion_each_message"):
+            self.emotional_state = EmotionalState()  # fresh baseline
+
+        # Compute delta from the new message
+        delta = build_delta_from_labels(raw_state)
+
+        # Update emotional state with EI‑2.0 inertia + decay
+        self.emotional_state = update_emotional_state(self.emotional_state, delta)
+
+        print("DEBUG EmotionalState:", self.emotional_state.as_dict())
+
+        # ---------------------------------------------------------
         # 3. Senate deliberation
+        # ---------------------------------------------------------
         ranked_proposals = self.senate.deliberate(self.context, message, self)
         self.last_ranked_proposals = ranked_proposals
 
-        # 4. Jury adjudication
+        # 4. Jury adjudication version EI‑2.0
         final_proposal = self.jury.adjudicate(
             ranked_proposals,
             message=message,
-            user_emotion=self.emotional_memory.get_emotional_state(),
+            user_emotion=self.emotional_memory.get_smoothed_state(),  # EI‑2.0
             memory_summary=self.context.get_memory_summary(),
+            emotional_state=EmotionalState.from_dict(self.emotional_state.as_dict()),
         )
+
         self.last_final_proposal = final_proposal
 
         # 5. Winning actor generates final response
@@ -210,25 +259,36 @@ class ContinuumController:
         if not actor:
             return "The Continuum encountered an error: unknown actor."
 
-        final_text = actor.respond(self.context, final_proposal)
+        final_text = actor.respond(
+            context=self.context,
+            proposal=final_proposal,
+            emotional_memory=self.emotional_memory,
+            emotional_state=EmotionalState.from_dict(self.emotional_state.as_dict()),
+        )
+        self.last_raw_actor_output = final_text
 
         # Meta-persona rewrite
-        rewritten = self.meta_persona.render(final_text, self.context)
+        rewritten = self.meta_persona.render(
+            final_text,
+            self.context,
+            self.emotional_state,
+            self.emotional_memory,
+        )
 
         # Store the rewritten version (not the raw actor output)
         self.context.add_assistant_message(rewritten)
 
-        # -----------------------------------------
         # Store per-turn metadata for timeline
-        # -----------------------------------------
         self.turn_history.append({
             "user": message,
             "emotion": {
-                "label": emotion_label,
-                "intensity": intensity
+                "dominant": dominant_emotion,
+                "intensity": intensity,
+                "raw_state": raw_state,
             },
             "final_proposal": final_proposal,
-            "assistant": rewritten
+            "assistant": rewritten,
         })
 
-        return ""
+        # ⭐ return the rewritten output
+        return rewritten

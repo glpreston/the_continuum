@@ -265,69 +265,91 @@ def score_intent_alignment(message: str, proposal: str, actor_name: str) -> floa
     score = 0.7 * msg_actor + 0.3 * msg_prop
     return max(0.0, min(score, 1.0))
 
-def score_emotional_alignment(user_emotion: str, actor_name: str, embed_fn) -> float:
+def score_emotional_alignment(user_emotion, actor_name: str, embed_fn) -> float:
     """
-    Compare the user's emotional state to the actor's emotional tone profile
-    using semantic similarity. Returns a score between 0 and 1.
-    """
-    if not user_emotion:
-        return 0.5  # neutral fallback
+    EI‑2.0 aware emotional alignment.
 
-    actor_profile = ACTOR_EMOTIONAL_PROFILES.get(actor_name, "")
-    if not actor_profile:
+    Supports:
+    - EI‑2.0 dict:
+        {
+            "smoothed_state": {...},
+            "dominant_emotion": str | None,
+            "confidence": float,
+            "volatility": float,
+        }
+    - Legacy string user_emotion (falls back to semantic profile match)
+    """
+
+    # -----------------------------
+    # Backwards‑compatible fallback
+    # -----------------------------
+    if isinstance(user_emotion, str):
+        # Old behavior: treat as a simple label / description
+        if not user_emotion:
+            return 0.5
+
+        actor_profile = ACTOR_EMOTIONAL_PROFILES.get(actor_name, "")
+        if not actor_profile or embed_fn is None:
+            return 0.5
+
+        user_vec = embed_fn(user_emotion)
+        actor_vec = embed_fn(actor_profile)
+
+        dot = sum(u * a for u, a in zip(user_vec, actor_vec))
+        norm_u = sum(u * u for u in user_vec) ** 0.5
+        norm_a = sum(a * a for a in actor_vec) ** 0.5
+
+        if norm_u == 0 or norm_a == 0:
+            return 0.5
+
+        similarity = dot / (norm_u * norm_a)
+        return (similarity + 1) / 2  # [-1,1] → [0,1]
+
+    # -----------------------------
+    # EI‑2.0 structured emotion
+    # -----------------------------
+    if not isinstance(user_emotion, dict):
         return 0.5
 
-    # Embed both
-    user_vec = embed_fn(user_emotion)
+    smoothed = user_emotion.get("smoothed_state", {}) or {}
+    dominant = user_emotion.get("dominant_emotion", None)
+    confidence = float(user_emotion.get("confidence", 0.0) or 0.0)
+    volatility = float(user_emotion.get("volatility", 0.0) or 0.0)
+
+    actor_profile = ACTOR_EMOTIONAL_PROFILES.get(actor_name, "")
+    if not actor_profile or embed_fn is None:
+        return 0.5
+
+    # Build a textual fingerprint of the emotional state for embedding
+    # e.g. "dominant: sadness; calm: 0.2; anxiety: 0.7; ..."
+    parts = []
+    if dominant:
+        parts.append(f"dominant: {dominant}")
+    for dim, val in smoothed.items():
+        parts.append(f"{dim}: {val:.3f}")
+    emo_text = "; ".join(parts) if parts else "neutral"
+
+    user_vec = embed_fn(emo_text)
     actor_vec = embed_fn(actor_profile)
 
-    # Cosine similarity
     dot = sum(u * a for u, a in zip(user_vec, actor_vec))
     norm_u = sum(u * u for u in user_vec) ** 0.5
     norm_a = sum(a * a for a in actor_vec) ** 0.5
 
     if norm_u == 0 or norm_a == 0:
-        return 0.5
+        base = 0.5
+    else:
+        similarity = dot / (norm_u * norm_a)
+        base = (similarity + 1) / 2  # [-1,1] → [0,1]
 
-    similarity = dot / (norm_u * norm_a)
+    # Confidence boosts alignment; volatility dampens it
+    volatility_factor = 1.0 / (1.0 + volatility)      # more volatility → smaller factor
+    confidence_factor = 0.5 + 0.5 * confidence        # [0.5, 1.0]
 
-    # Normalize from [-1, 1] → [0, 1]
-    return (similarity + 1) / 2
+    score = base * volatility_factor * confidence_factor
 
-def legacy_score_emotional_alignment(user_emotion: str, proposal: str) -> float:
-    """
-    Measures tone matching.
-    """
-    if not proposal:
-        return 0.5
-
-    if not user_emotion:
-        return 0.5
-
-    emo = user_emotion.lower()
-    text = proposal.lower()
-
-    emotional_words = {
-        "joy": {"joy", "delight", "warmth", "hope", "light"},
-        "sadness": {"sad", "lonely", "loss", "grief", "forgotten"},
-        "fear": {"fear", "uncertain", "uneasy", "anxious"},
-        "anger": {"anger", "frustration", "injustice"},
-        "surprise": {"unexpected", "sudden", "surprising"},
-        "disgust": {"disgust", "repulsed", "revolted"},
-        "neutral": set(),
-    }
-
-    if emo in emotional_words and emotional_words[emo]:
-        if any(w in text for w in emotional_words[emo]):
-            return 0.9
-        else:
-            return 0.6
-
-    flat_emo_words = set().union(*emotional_words.values())
-    if any(w in text for w in flat_emo_words):
-        return 0.7
-
-    return 0.5
+    # Clamp to [0,1]
+    return max(0.0, min(score, 1.0))
 
 def score_novelty(proposal: str, all_proposals: List[str]) -> float:
     """
