@@ -230,6 +230,10 @@ class ContinuumController:
         # Update emotional state with EI‑2.0 inertia + decay
         self.emotional_state = update_emotional_state(self.emotional_state, delta)
 
+        # Expose emotional state + memory for UI panels
+        self.last_emotional_state = self.emotional_state
+        self.last_emotional_memory = self.emotional_memory
+
         print("DEBUG EmotionalState:", self.emotional_state.as_dict())
 
         # ---------------------------------------------------------

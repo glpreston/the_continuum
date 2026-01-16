@@ -1,5 +1,5 @@
 # continuum/persona/meta_persona.py
-# version EI‑2.0
+# version EI‑2.0 (refactored with voiceprint + validator integration)
 
 from __future__ import annotations
 from dataclasses import dataclass
@@ -8,6 +8,9 @@ import re
 
 from continuum.meta.aria_emotional_blending import compute_aria_style
 from continuum.emotion.emotional_memory_influence import emotional_memory_modifiers
+from continuum.persona.voiceprint_loader import voiceprint_loader
+from continuum.validators.voiceprint_validator import validate_output
+from continuum.debug.meta_persona_panel import MetaPersonaDebugPanel
 
 
 @dataclass
@@ -22,8 +25,21 @@ class MetaPersona:
     traits: Dict[str, str]
 
     # ---------------------------------------------------------
-    # EI‑2.0 Tone Selection (Step 3 smoothing applied)
+    # Core emotional helpers
     # ---------------------------------------------------------
+    def _compute_dominant_emotion(self, emotional_state) -> str:
+        state_dict = emotional_state.as_dict()
+        filtered = {k: v for k, v in state_dict.items() if k != "fatigue"}
+
+        values = list(filtered.values())
+        max_val = max(values)
+        min_val = min(values)
+
+        if max_val - min_val < 0.02:
+            return "neutral"
+
+        return max(filtered, key=filtered.get)
+
     def _tone_prefix(self, dominant: str, volatility: float, confidence: float) -> str:
         if volatility > 0.55:
             return "Let’s slow down and take this step by step. "
@@ -43,7 +59,7 @@ class MetaPersona:
         return ""
 
     # ---------------------------------------------------------
-    # EI‑2.0 Rewrite Layer
+    # Step 3 — Style rewrite (EI‑2.0)
     # ---------------------------------------------------------
     def apply_style(self, text: str, style: Dict[str, float]) -> str:
         warmth = style["warmth"]
@@ -108,7 +124,7 @@ class MetaPersona:
         return text
 
     # ---------------------------------------------------------
-    # Step 5 — Final Emotional Rewrite Layer (Hybrid expressive)
+    # Step 5 — Memory & user emotion tone
     # ---------------------------------------------------------
     def _apply_memory_tone(self, text: str, memory_mods: Dict[str, float]) -> str:
         if memory_mods.get("warmth_boost", 0) > 0.25:
@@ -131,7 +147,6 @@ class MetaPersona:
         max_val = max(values)
         min_val = min(values)
 
-        # Treat nearly-flat vectors as neutral
         if max_val - min_val < 0.02:
             dominant = "neutral"
         else:
@@ -151,6 +166,9 @@ class MetaPersona:
 
         return text
 
+    # ---------------------------------------------------------
+    # Volatility & stochastic modulation
+    # ---------------------------------------------------------
     def _apply_volatility_modulation(self, text: str, volatility: float) -> str:
         if volatility > 0.55:
             text = re.sub(r"\bperhaps\b", "let’s take this one step at a time", text)
@@ -190,12 +208,66 @@ class MetaPersona:
 
         return text
 
-    def _final_rewrite(self, text: str, emotional_state, emotional_memory, style: Dict[str, float], memory_mods: Dict[str, float]) -> str:
+    # ---------------------------------------------------------
+    # Voiceprint constraints (light integration)
+    # ---------------------------------------------------------
+    def _apply_voiceprint_constraints(self, text: str, dominant_emotion: str) -> str:
+        pacing_rules = voiceprint_loader.get_pacing_rules()
+        forbidden = voiceprint_loader.get_forbidden_elements()
+
+        # Light forbidden element mitigation
+        for term in forbidden:
+            if term.lower() in text.lower():
+                text = text.replace("obviously", "notably")
+                text = text.replace("clearly you", "it may seem")
+
+        # Pacing: high emotion → allow more line breaks if voiceprint permits
+        if dominant_emotion in ("sadness", "fatigue", "tension"):
+            if pacing_rules.get("high_emotion_line_breaks", False):
+                text = re.sub(r"\. (?=[A-Z])", ".\n\n", text)
+
+        return text
+
+    # ---------------------------------------------------------
+    # Final rewrite orchestration
+    # ---------------------------------------------------------
+    def _final_rewrite(
+        self,
+        text: str,
+        emotional_state,
+        emotional_memory,
+        style: Dict[str, float],
+        memory_mods: Dict[str, float],
+        dominant: str,
+    ) -> str:
         text = self._apply_memory_tone(text, memory_mods)
         text = self._apply_user_emotion_tone(text, emotional_state)
         text = self._apply_volatility_modulation(text, emotional_memory.volatility)
         text = self._apply_stochastic_variation(text, style)
+        text = self._apply_voiceprint_constraints(text, dominant)
         return text
+
+    # ---------------------------------------------------------
+    # Validation hook
+    # ---------------------------------------------------------
+    def _validate_voiceprint_alignment(
+        self,
+        text: str,
+        emotional_state,
+        context: Any,
+    ) -> None:
+        if not context.debug_flags.get("validate_voiceprint"):
+            return
+
+        report = validate_output(
+            text,
+            emotional_state.as_dict(),
+            voiceprint_loader.voiceprint,
+        )
+
+        print("\n=== Voiceprint Validation Report ===")
+        print(report)
+        print("====================================\n")
 
     # ---------------------------------------------------------
     # EI‑2.0 Meta‑Persona Rendering
@@ -210,36 +282,19 @@ class MetaPersona:
             actor = context.last_final_proposal.get("actor", "unknown")
             prefix += f"[{actor}] "
 
-        # ---------------------------------------------------------
-        # EI‑2.0: Extract emotional signals
-        # ---------------------------------------------------------
-        state_dict = emotional_state.as_dict()
-
-        # Exclude fatigue from flatness check
-        filtered = {k: v for k, v in state_dict.items() if k != "fatigue"}
-
-        values = list(filtered.values())
-        max_val = max(values)
-        min_val = min(values)
-
-        if max_val - min_val < 0.02:
-            dominant = "neutral"
-        else:
-            dominant = max(filtered, key=filtered.get)
-
-        print("DEBUG PREFIX DOMINANT:", dominant)
+        # Emotional signals
+        dominant = self._compute_dominant_emotion(emotional_state)
         volatility = emotional_memory.volatility
         confidence = emotional_memory.confidence
 
-        # ---------------------------------------------------------
-        # Step F‑2: Emotional Memory Influence
-        # ---------------------------------------------------------
-        memory_mods = emotional_memory_modifiers(emotional_memory)
+        print("DEBUG PREFIX DOMINANT:", dominant)
 
+        # Emotional memory influence
+        memory_mods = emotional_memory_modifiers(emotional_memory)
         emotional_prefix = self._tone_prefix(dominant, volatility, confidence)
 
+        # Style blending
         style = compute_aria_style(emotional_state)
-
         style["warmth"] += memory_mods["warmth_boost"]
         style["clarity"] += memory_mods["clarity_boost"]
         style["softness"] += memory_mods["grounding_boost"]
@@ -258,6 +313,37 @@ class MetaPersona:
         if emotional_prefix:
             emotional_prefix = emotional_prefix.rstrip() + " — "
 
-        blended = self._final_rewrite(blended, emotional_state, emotional_memory, style, memory_mods)
+        blended = self._final_rewrite(
+            blended,
+            emotional_state,
+            emotional_memory,
+            style,
+            memory_mods,
+            dominant,
+        )
+
+        # Optional voiceprint validation (returns report)
+        report = None
+        if context.debug_flags.get("validate_voiceprint"):
+            report = validate_output(
+                blended,
+                emotional_state.as_dict(),
+                voiceprint_loader.voiceprint
+            )
+
+        # Optional debug panel
+        if context.debug_flags.get("debug_meta_persona"):
+            panel = MetaPersonaDebugPanel()
+            print(
+                panel.render(
+                    emotional_state,
+                    emotional_memory,
+                    style,
+                    memory_mods,
+                    dominant,
+                    voiceprint_loader,
+                    report,
+                )
+            )
 
         return f"{prefix}{emotional_prefix}{blended}"

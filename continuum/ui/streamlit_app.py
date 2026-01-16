@@ -24,6 +24,8 @@ from continuum.ui.panels.turn_timeline_panel import render_turn_timeline
 from continuum.ui.panels.decision_breakdown_panel import render_decision_breakdown
 from continuum.ui.panels.decision_matrix_panel import render_decision_matrix
 from continuum.ui.panels.debug_diagnostics_panel import render_debug_diagnostics
+from continuum.ui.panels.meta_persona_debug_tab import render_meta_persona_debug_tab
+
 
 
 
@@ -96,7 +98,14 @@ def main():
     # ---------------------------------------------------------
     # MAIN AREA — Chat + Diagnostics Tabs
     # ---------------------------------------------------------
-    tabs = st.tabs(["Chat", "Diagnostics", "Decision Matrix", "Debug Diagnostics"])
+    #tabs = st.tabs(["Chat", "Diagnostics", "Decision Matrix", "Debug Diagnostics"])
+    tabs = st.tabs([
+        "Chat",
+        "Diagnostics",
+        "Decision Matrix",
+        "Debug Diagnostics",
+        "Meta‑Persona Debug"
+    ])
 
     # Chat Tab
     with tabs[0]:
@@ -151,6 +160,10 @@ def main():
         render_decision_matrix(controller)
     with tabs[3]:
         render_debug_diagnostics(controller)
+
+    with tabs[4]:
+        render_meta_persona_debug_tab(controller)
+
 
 # ---------------------------------------------------------
 # Theme Application

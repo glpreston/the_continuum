@@ -4,6 +4,12 @@
 import streamlit as st
 import pandas as pd
 
+from continuum.meta.aria_emotional_blending import compute_aria_style
+from continuum.debug.meta_persona_panel import MetaPersonaDebugPanel
+from continuum.persona.voiceprint_loader import voiceprint_loader
+
+def render_meta_persona_debug_tab(controller):
+    ...
 
 def render_debug_diagnostics(controller):
     st.title("Continuum Diagnostics")
@@ -62,21 +68,15 @@ def render_debug_diagnostics(controller):
         if not ranked:
             st.info("No Senate proposals available yet.")
         else:
-            # Flatten proposals into a table
             rows = []
             for idx, proposal in enumerate(ranked, start=1):
-                actor = proposal.get("actor", "unknown")
-                score = proposal.get("score", None)
-                reason = proposal.get("reason", "")
-                text = proposal.get("text", "")
-
                 rows.append(
                     {
                         "Rank": idx,
-                        "Actor": actor,
-                        "Score": score,
-                        "Reason": reason,
-                        "Text": text,
+                        "Actor": proposal.get("actor", "unknown"),
+                        "Score": proposal.get("score", None),
+                        "Reason": proposal.get("reason", ""),
+                        "Text": proposal.get("text", ""),
                     }
                 )
 
@@ -129,22 +129,17 @@ def render_debug_diagnostics(controller):
         else:
             rows = []
             for idx, turn in enumerate(history, start=1):
-                user = turn.get("user", "")
                 emotion = turn.get("emotion", {}) or {}
-                label = emotion.get("label", "")
-                intensity = emotion.get("intensity", 0.0)
                 final_proposal = turn.get("final_proposal", {}) or {}
-                actor = final_proposal.get("actor", "unknown")
-                assistant = turn.get("assistant", "")
 
                 rows.append(
                     {
                         "Turn": idx,
-                        "User": user,
-                        "Emotion Label": label,
-                        "Emotion Intensity": intensity,
-                        "Winning Actor": actor,
-                        "Assistant (Meta‑Persona)": assistant,
+                        "User": turn.get("user", ""),
+                        "Emotion Label": emotion.get("label", ""),
+                        "Emotion Intensity": emotion.get("intensity", 0.0),
+                        "Winning Actor": final_proposal.get("actor", "unknown"),
+                        "Assistant (Meta‑Persona)": turn.get("assistant", ""),
                     }
                 )
 
@@ -160,17 +155,67 @@ def render_debug_diagnostics(controller):
         if not tool_logs:
             st.info("No tool logs recorded yet.")
         else:
-            # Expect each log to be a dict; if not, wrap
-            normalized = []
-            for entry in tool_logs:
-                if isinstance(entry, dict):
-                    normalized.append(entry)
-                else:
-                    normalized.append({"entry": str(entry)})
+            normalized = [
+                entry if isinstance(entry, dict) else {"entry": str(entry)}
+                for entry in tool_logs
+            ]
 
             df = pd.DataFrame(normalized)
             st.dataframe(df, use_container_width=True)
 
+
+    # ----------------------------------------------------------------------
+    # Meta‑Persona Debug Panel (EI‑2.0 Internal State)
+    # ----------------------------------------------------------------------
+    with st.expander("Meta‑Persona Debug Panel", expanded=False):
+        context = getattr(controller, "context", None)
+        meta = getattr(controller, "meta_persona", None)
+
+        if context is None or meta is None:
+            st.info("Meta‑Persona context not available.")
+        else:
+            # We need the emotional state + memory from the controller
+            emotional_state = getattr(controller, "last_emotional_state", None)
+            emotional_memory = getattr(controller, "emotional_memory", None)
+
+            if emotional_state is None or emotional_memory is None:
+                st.info("No emotional state available for Meta‑Persona.")
+            else:
+                # Compute the same values MetaPersona.render() uses
+                dominant = meta._compute_dominant_emotion(emotional_state)
+                memory_mods = emotional_memory.get_modifiers() if hasattr(emotional_memory, "get_modifiers") else {}
+                style = compute_aria_style(emotional_state)
+
+                # Apply memory modifiers to style (same as render())
+                if memory_mods:
+                    style["warmth"] += memory_mods.get("warmth_boost", 0)
+                    style["clarity"] += memory_mods.get("clarity_boost", 0)
+                    style["softness"] += memory_mods.get("grounding_boost", 0)
+                    style["brevity"] += memory_mods.get("pacing_slowdown", 0)
+
+                # Optional validator report
+                report = None
+                if context.debug_flags.get("validate_voiceprint"):
+                    report = validate_output(
+                        "debug-sample",
+                        emotional_state.as_dict(),
+                        voiceprint_loader.voiceprint,
+                    )
+
+                # Render the panel
+                panel = MetaPersonaDebugPanel()
+                debug_text = panel.render(
+                    emotional_state,
+                    emotional_memory,
+                    style,
+                    memory_mods,
+                    dominant,
+                    voiceprint_loader,
+                    report,
+                )
+
+                st.text(debug_text)
+                
     # ----------------------------------------------------------------------
     # Meta‑Persona Output Trace
     # ----------------------------------------------------------------------
@@ -180,8 +225,7 @@ def render_debug_diagnostics(controller):
         if context is None:
             st.info("No context available.")
         else:
-            # Show last few assistant messages and raw actor output if present
-            messages = context.messages if hasattr(context, "messages") else []
+            messages = getattr(context, "messages", [])
             last_raw = getattr(controller, "last_raw_actor_output", None)
 
             if last_raw:
@@ -190,14 +234,10 @@ def render_debug_diagnostics(controller):
 
             if messages:
                 st.subheader("Recent Conversation Messages")
-                rows = []
-                for msg in messages[-10:]:
-                    rows.append(
-                        {
-                            "Role": getattr(msg, "role", ""),
-                            "Content": getattr(msg, "content", ""),
-                        }
-                    )
+                rows = [
+                    {"Role": msg.role, "Content": msg.content}
+                    for msg in messages[-10:]
+                ]
                 df = pd.DataFrame(rows)
                 st.dataframe(df, use_container_width=True)
             else:
