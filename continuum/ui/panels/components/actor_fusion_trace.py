@@ -26,7 +26,7 @@ def render_actor_fusion_trace(controller):
                 }
             )
         st.markdown("**Senate Ranked Proposals**")
-        st.dataframe(pd.DataFrame(rows), use_container_width=True)
+        st.dataframe(pd.DataFrame(rows), width="stretch")
 
     if final:
         st.markdown("**Jury Final Decision**")

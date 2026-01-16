@@ -17,27 +17,26 @@ def render_decision_matrix(controller):
     winner = final.get("actor", "unknown")
 
     st.title("Decision Matrix")
-    st.caption("Compare all actors across Jury scoring dimensions.")
+    st.caption("Compare all actors across Jury scoring dimensions (Rubric 3.0).")
 
     if not all_scores:
         st.info("No jury scores available.")
         return
 
     # ---------------------------------------------------------
-    # Build the main matrix table
+    # Build the main matrix table (Rubric 3.0 fields)
     # ---------------------------------------------------------
     rows = []
     for actor, scores in all_scores.items():
         rows.append({
             "Actor": actor,
-            "Relevance": round(scores["relevance"], 3),
-            "Coherence": round(scores["coherence"], 3),
-            "Reasoning": round(scores["reasoning_quality"], 3),
-            "Intent": round(scores["intent_alignment"], 3),
-            "Emotion": round(scores["emotional_alignment"], 3),
-            "Novelty": round(scores["novelty"], 3),
-            "Memory": round(scores["memory_alignment"], 3),
-            "Total": round(scores["total"], 3),
+            "Relevance": round(scores.get("relevance", 0.0), 3),
+            "Semantic Depth": round(scores.get("semantic_depth", 0.0), 3),
+            "Structure": round(scores.get("structure", 0.0), 3),
+            "Emotion": round(scores.get("emotional_alignment", 0.0), 3),
+            "Novelty": round(scores.get("novelty", 0.0), 3),
+            "Memory": round(scores.get("memory_alignment", 0.0), 3),
+            "Total": round(scores.get("total", 0.0), 3),
             "🏆": "✅" if actor == winner else ""
         })
 
@@ -61,10 +60,9 @@ def render_decision_matrix(controller):
     # ---------------------------------------------------------
     st.subheader("Why Not the Runner-Up?")
 
-    # Sort actors by total score
     sorted_actors = sorted(
         all_scores.items(),
-        key=lambda x: x[1]["total"],
+        key=lambda x: x[1].get("total", 0.0),
         reverse=True
     )
 
@@ -73,18 +71,25 @@ def render_decision_matrix(controller):
 
         st.write(f"**Runner-Up:** `{runner_up}`")
 
-        # Compare winner vs runner-up dimension by dimension
         winner_scores = all_scores[winner]
 
         comparison_rows = []
-        for metric in ["relevance", "coherence", "reasoning_quality",
-                       "intent_alignment", "emotional_alignment",
-                       "novelty", "memory_alignment", "total"]:
+        for metric in [
+            "relevance",
+            "semantic_depth",
+            "structure",
+            "emotional_alignment",
+            "novelty",
+            "memory_alignment",
+            "total"
+        ]:
             comparison_rows.append({
                 "Metric": metric,
-                "Winner": round(winner_scores[metric], 3),
-                "Runner-Up": round(runner_up_scores[metric], 3),
-                "Difference": round(winner_scores[metric] - runner_up_scores[metric], 3)
+                "Winner": round(winner_scores.get(metric, 0.0), 3),
+                "Runner-Up": round(runner_up_scores.get(metric, 0.0), 3),
+                "Difference": round(
+                    winner_scores.get(metric, 0.0) - runner_up_scores.get(metric, 0.0), 3
+                )
             })
 
         comp_df = pd.DataFrame(comparison_rows)
@@ -101,7 +106,6 @@ def render_decision_matrix(controller):
     # Actor Reasoning (per‑actor)
     # ---------------------------------------------------------
     st.subheader("Actor Reasoning")
-
 
     reasoning_traces = meta.get("reasoning_traces", {})
 

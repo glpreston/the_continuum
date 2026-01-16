@@ -12,7 +12,33 @@ class EmotionalState:
     tension: float = 0.5
     curiosity: float = 0.5
     fatigue: float = 0.0
-    confidence: float = 0.5
+    confidence: float = 0.5   # baseline confidence
+
+    # ---------------------------------------------------------
+    # Computed properties (EI‑2.0)
+    # ---------------------------------------------------------
+    @property
+    def volatility(self) -> float:
+        """
+        Volatility = L1 distance between this state and previous state.
+        If no previous state exists, volatility = 0.
+        """
+        prev = getattr(self, "_prev_state", None)
+        if prev is None:
+            return 0.0
+
+        keys = ["joy", "calm", "focus", "tension", "curiosity", "fatigue"]
+        diffs = [abs(getattr(self, k) - getattr(prev, k)) for k in keys]
+        return sum(diffs)
+
+    @property
+    def confidence_level(self) -> float:
+        """
+        Confidence = inverse of volatility.
+        (We keep the original .confidence field for backward compatibility.)
+        """
+        v = self.volatility
+        return max(0.0, 1.0 - min(v, 1.0))
 
     def as_dict(self) -> Dict[str, float]:
         return {
@@ -54,6 +80,7 @@ def update_emotional_state(
     - apply inertia
     - apply decay
     - clamp to [0, 1]
+    - store previous state for volatility computation
     """
     current = state.as_dict()
     new_state: Dict[str, float] = {}
@@ -70,4 +97,9 @@ def update_emotional_state(
 
         new_state[key] = clamp(decayed)
 
-    return EmotionalState.from_dict(new_state)
+    updated = EmotionalState.from_dict(new_state)
+
+    # ⭐ store previous state for volatility calculation
+    updated._prev_state = state
+
+    return updated

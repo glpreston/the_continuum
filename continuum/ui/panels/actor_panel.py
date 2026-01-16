@@ -13,6 +13,11 @@ def render_actor_panel(controller):
 
     for actor_name, actor in controller.actors.items():
 
+        # Skip LLM actors that do not have voice UI
+        voice = getattr(actor, "voice", None)
+        if voice is None or not hasattr(voice, "ui"):
+            continue
+
         card = ACTOR_CARDS.get(actor_name)
         voice = VOICEPRINTS.get(actor_name)
         settings = controller.actor_settings.get(actor_name, {})

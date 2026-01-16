@@ -7,9 +7,12 @@ import pandas as pd
 from continuum.meta.aria_emotional_blending import compute_aria_style
 from continuum.debug.meta_persona_panel import MetaPersonaDebugPanel
 from continuum.persona.voiceprint_loader import voiceprint_loader
+from continuum.validators.voiceprint_validator import validate_output
+
 
 def render_meta_persona_debug_tab(controller):
     ...
+    
 
 def render_debug_diagnostics(controller):
     st.title("Continuum Diagnostics")
@@ -42,7 +45,7 @@ def render_debug_diagnostics(controller):
                 payload["smoothed_state"].items(),
                 columns=["Dimension", "Intensity"],
             )
-            st.dataframe(smoothed_df, use_container_width=True)
+            st.dataframe(smoothed_df, width="stretch")
 
             # Trend
             st.subheader("Trend (Direction of Change)")
@@ -50,14 +53,14 @@ def render_debug_diagnostics(controller):
                 payload["trend"].items(),
                 columns=["Dimension", "Trend"],
             )
-            st.dataframe(trend_df, use_container_width=True)
+            st.dataframe(trend_df, width="stretch")
 
             st.markdown("---")
 
             # Recent events
             st.subheader("Recent Emotional Events")
             events_df = pd.DataFrame(payload["last_events"])
-            st.dataframe(events_df, use_container_width=True)
+            st.dataframe(events_df, width="stretch")
 
     # ----------------------------------------------------------------------
     # Senate Diagnostics
@@ -82,7 +85,7 @@ def render_debug_diagnostics(controller):
 
             df = pd.DataFrame(rows)
             st.subheader("Ranked Proposals")
-            st.dataframe(df, use_container_width=True)
+            st.dataframe(df, width="stretch")
 
     # ----------------------------------------------------------------------
     # Jury Diagnostics
@@ -113,7 +116,7 @@ def render_debug_diagnostics(controller):
                     df = df.sort_values("total", ascending=False)
 
                 st.subheader("Per‑Actor Rubric Scores")
-                st.dataframe(df.style.highlight_max(axis=0), use_container_width=True)
+                st.dataframe(df.style.highlight_max(axis=0), width="stretch")
 
                 st.subheader("Winner Breakdown")
                 st.json(all_scores.get(winner, {}))
@@ -144,7 +147,7 @@ def render_debug_diagnostics(controller):
                 )
 
             df = pd.DataFrame(rows)
-            st.dataframe(df, use_container_width=True)
+            st.dataframe(df, width="stretch")
 
     # ----------------------------------------------------------------------
     # Controller Flow / Tool Logs
@@ -161,8 +164,7 @@ def render_debug_diagnostics(controller):
             ]
 
             df = pd.DataFrame(normalized)
-            st.dataframe(df, use_container_width=True)
-
+            st.dataframe(df, width="stretch")
 
     # ----------------------------------------------------------------------
     # Meta‑Persona Debug Panel (EI‑2.0 Internal State)
@@ -183,7 +185,11 @@ def render_debug_diagnostics(controller):
             else:
                 # Compute the same values MetaPersona.render() uses
                 dominant = meta._compute_dominant_emotion(emotional_state)
-                memory_mods = emotional_memory.get_modifiers() if hasattr(emotional_memory, "get_modifiers") else {}
+                memory_mods = (
+                    emotional_memory.get_modifiers()
+                    if hasattr(emotional_memory, "get_modifiers")
+                    else {}
+                )
                 style = compute_aria_style(emotional_state)
 
                 # Apply memory modifiers to style (same as render())
@@ -215,7 +221,7 @@ def render_debug_diagnostics(controller):
                 )
 
                 st.text(debug_text)
-                
+
     # ----------------------------------------------------------------------
     # Meta‑Persona Output Trace
     # ----------------------------------------------------------------------
@@ -239,6 +245,6 @@ def render_debug_diagnostics(controller):
                     for msg in messages[-10:]
                 ]
                 df = pd.DataFrame(rows)
-                st.dataframe(df, use_container_width=True)
+                st.dataframe(df, width="stretch")
             else:
                 st.info("No messages recorded in context yet.")

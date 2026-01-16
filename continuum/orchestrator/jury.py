@@ -8,15 +8,16 @@ from continuum.emotion.jury_adaptive_weights import compute_adaptive_weights
 
 class Jury:
     """
-    Jury 2.0
-    --------
+    Jury 3.0 (LLM‑aware, Rubric 3.0)
+    --------------------------------
     Evaluates actor proposals using a structured scoring rubric.
     Selects the best proposal based on weighted criteria and provides
     a transparent explanation of the decision.
     """
 
     def __init__(self):
-        self.embed_fn = None   # required for emotional alignment scoring
+        # Wired in ContinuumController: used for semantic / emotional alignment
+        self.embed_fn = None
 
     # ---------------------------------------------------------
     # SCORE ALL PROPOSALS
@@ -30,17 +31,30 @@ class Jury:
     ) -> Dict[str, Dict[str, float]]:
 
         all_contents = [p.get("content", "") for p in proposals]
-        scored = {}
+        scored: Dict[str, Dict[str, float]] = {}
 
         for p in proposals:
             actor = p.get("actor", "unknown")
             content = p.get("content", "")
-            reasoning = p.get("metadata", {}).get("reasoning", [])
+
+            # Ensure metadata exists
+            metadata = p.get("metadata", {})
+            if "metadata" not in p:
+                p["metadata"] = metadata
+
+            # Legacy Phase‑3: hand‑crafted reasoning steps (kept for compatibility)
+            reasoning = metadata.get("reasoning", [])
+
+            # Phase‑4: LLM metadata
+            llm_prompt = metadata.get("prompt_used", "")
+            model_name = metadata.get("model", "")
 
             scored[actor] = score_proposal(
                 message=message,
                 proposal=content,
-                reasoning_steps=reasoning,
+                reasoning_steps=reasoning,   # Phase‑3 compatibility
+                llm_prompt=llm_prompt,       # Phase‑4 LLM support
+                model_name=model_name,       # Phase‑4 LLM support
                 user_emotion=user_emotion,
                 memory_summary=memory_summary,
                 all_proposals=all_contents,
@@ -59,7 +73,7 @@ class Jury:
         return max(scored.keys(), key=lambda a: scored[a]["total"])
 
     # ---------------------------------------------------------
-    # EXPLAIN DECISION
+    # EXPLAIN DECISION (Rubric 3.0 fields)
     # ---------------------------------------------------------
     def explain_choice(self, winner: str, scored: Dict[str, Dict[str, float]]) -> str:
         if winner not in scored:
@@ -67,17 +81,17 @@ class Jury:
 
         b = scored[winner]
 
+        # Use .get with defaults to avoid crashes if any field is missing
         return (
             f"The Jury selected **{winner}** based on its strong performance "
             f"across multiple criteria. Key factors included:\n"
-            f"- Relevance: {b['relevance']:.2f}\n"
-            f"- Coherence: {b['coherence']:.2f}\n"
-            f"- Reasoning Quality: {b['reasoning_quality']:.2f}\n"
-            f"- Intent Alignment: {b['intent_alignment']:.2f}\n"
-            f"- Emotional Alignment: {b['emotional_alignment']:.2f}\n"
-            f"- Novelty: {b['novelty']:.2f}\n"
-            f"- Memory Alignment: {b['memory_alignment']:.2f}\n\n"
-            f"Weighted total score: **{b['total']:.3f}**."
+            f"- Relevance: {b.get('relevance', 0.0):.2f}\n"
+            f"- Semantic Depth: {b.get('semantic_depth', 0.0):.2f}\n"
+            f"- Structure: {b.get('structure', 0.0):.2f}\n"
+            f"- Emotional Alignment: {b.get('emotional_alignment', 0.0):.2f}\n"
+            f"- Memory Alignment: {b.get('memory_alignment', 0.0):.2f}\n"
+            f"- Novelty: {b.get('novelty', 0.0):.2f}\n\n"
+            f"Weighted total score: **{b.get('total', 0.0):.3f}**."
         )
 
     # ---------------------------------------------------------
@@ -116,7 +130,7 @@ class Jury:
         message: str = "",
         user_emotion: str = "",
         memory_summary: str = "",
-        emotional_state=None,   # ⭐ NEW
+        emotional_state=None,   # Phase 4B: adaptive weights
     ) -> Dict[str, Any]:
 
         if not proposals:
@@ -133,12 +147,11 @@ class Jury:
         else:
             adaptive_weights = {
                 "relevance": 1.0,
-                "coherence": 1.0,
-                "reasoning_quality": 1.0,
-                "intent_alignment": 1.0,
+                "semantic_depth": 1.0,
+                "structure": 1.0,
                 "emotional_alignment": 1.0,
-                "novelty": 1.0,
                 "memory_alignment": 1.0,
+                "novelty": 1.0,
             }
 
         # 1. Score proposals
@@ -149,16 +162,22 @@ class Jury:
             memory_summary=memory_summary,
         )
 
-        # Apply adaptive weights to totals
+        # Apply adaptive weights to totals (Rubric 3.0, defensive)
         for actor, dims in scored.items():
+            relevance = dims.get("relevance", 0.0)
+            semantic_depth = dims.get("semantic_depth", 0.0)
+            structure = dims.get("structure", 0.0)
+            emotional_alignment = dims.get("emotional_alignment", 0.0)
+            memory_alignment = dims.get("memory_alignment", 0.0)
+            novelty = dims.get("novelty", 0.0)
+
             dims["total"] = (
-                dims["relevance"] * adaptive_weights["relevance"]
-                + dims["coherence"] * adaptive_weights["coherence"]
-                + dims["reasoning_quality"] * adaptive_weights["reasoning_quality"]
-                + dims["intent_alignment"] * adaptive_weights["intent_alignment"]
-                + dims["emotional_alignment"] * adaptive_weights["emotional_alignment"]
-                + dims["novelty"] * adaptive_weights["novelty"]
-                + dims["memory_alignment"] * adaptive_weights["memory_alignment"]
+                relevance * adaptive_weights.get("relevance", 1.0)
+                + semantic_depth * adaptive_weights.get("semantic_depth", 1.0)
+                + structure * adaptive_weights.get("structure", 1.0)
+                + emotional_alignment * adaptive_weights.get("emotional_alignment", 1.0)
+                + memory_alignment * adaptive_weights.get("memory_alignment", 1.0)
+                + novelty * adaptive_weights.get("novelty", 1.0)
             )
 
         # 2. Select winner
@@ -171,19 +190,61 @@ class Jury:
                 "metadata": {"type": "jury_no_selection"},
             }
 
-        winning_proposal = next(p for p in proposals if p.get("actor") == winner)
+        winning_proposal = next((p for p in proposals if p.get("actor") == winner), None)
+        if winning_proposal is None:
+            return {
+                "actor": "Jury",
+                "content": "The Jury could not match the winning actor to a proposal.",
+                "confidence": 0.0,
+                "metadata": {"type": "jury_actor_mismatch"},
+            }
 
         # 3. Explanation + dissent
         explanation = self.explain_choice(winner, scored)
         dissent = self.generate_dissent(winner, scored)
 
         # 4. Attach metadata
-        winning_proposal["metadata"]["jury_reasoning"] = explanation
-        winning_proposal["metadata"]["jury_scores"] = scored[winner]
-        winning_proposal["metadata"]["jury_all_scores"] = scored
-        winning_proposal["metadata"]["jury_weights"] = adaptive_weights
+        metadata = winning_proposal.setdefault("metadata", {})
+        metadata["jury_reasoning"] = explanation
+        metadata["jury_scores"] = scored[winner]
+        metadata["jury_all_scores"] = scored
+        # 4. Attach metadata
+
+        # Remap legacy weight keys (Rubric 2.x → Rubric 3.0) if present
+        if "coherence" in adaptive_weights or "reasoning_quality" in adaptive_weights or "intent_alignment" in adaptive_weights:
+            remapped_weights = {
+                "relevance": adaptive_weights.get("relevance", 1.0),
+                "semantic_depth": adaptive_weights.get("reasoning_quality", 1.0),  # depth ~ reasoning_quality
+                "structure": adaptive_weights.get("coherence", 1.0),               # structure ~ coherence
+                "emotional_alignment": adaptive_weights.get("emotional_alignment", 1.0),
+                "memory_alignment": adaptive_weights.get("memory_alignment", 1.0),
+                "novelty": adaptive_weights.get("novelty", 1.0),
+            }
+        else:
+            remapped_weights = adaptive_weights
+
+        metadata = winning_proposal.setdefault("metadata", {})
+        metadata["jury_reasoning"] = explanation
+        metadata["jury_scores"] = scored[winner]
+        metadata["jury_all_scores"] = scored
+        metadata["jury_weights"] = remapped_weights
+
+
+
 
         if dissent:
-            winning_proposal["metadata"]["jury_dissent"] = dissent
+            metadata["jury_dissent"] = dissent
+
+        # 5. Fusion weights (Fusion 2.0)
+        totals = {actor: dims["total"] for actor, dims in scored.items()}
+        sum_total = sum(totals.values()) or 1.0  # avoid division by zero
+
+        fusion_weights = {
+            actor: total / sum_total
+            for actor, total in totals.items()
+        }
+
+        metadata["fusion_weights"] = fusion_weights
+        metadata["is_llm"] = metadata.get("type") == "llm_actor"
 
         return winning_proposal

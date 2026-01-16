@@ -35,5 +35,5 @@ def render_voiceprint_heatmap(controller, emotional_state, style):
 
     st.dataframe(
         df.style.apply(color_row, axis=1),
-        use_container_width=True
+         width="stretch"
     )

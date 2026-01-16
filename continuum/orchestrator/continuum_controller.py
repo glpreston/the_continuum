@@ -1,32 +1,36 @@
 # continuum/orchestrator/continuum_controller.py
-# updated for ei 2.0
+# updated for EI 2.0 + modular Fusion/Arc
 
 import uuid
-from typing import Any, List
+from typing import Any, List, Dict
 
 from ..core.context import ContinuumContext
 from .senate import Senate
 from .jury import Jury
 from continuum.tools.tool_registry import ToolRegistry
 from continuum.persona.meta_persona import MetaPersona
-import inspect
-print("MetaPersona loaded from:", inspect.getfile(MetaPersona))
 
-# Senate actors
 from continuum.actors.senate_architect import SenateArchitect
 from continuum.actors.senate_storyweaver import SenateStoryweaver
 from continuum.actors.senate_analyst import SenateAnalyst
 from continuum.actors.senate_synthesizer import SenateSynthesizer
 
-# Emotional memory
 from continuum.persona.emotional_memory import EmotionalMemory
-
-# Semantic embedding for Jury emotional alignment
 from continuum.memory.semantic import embed as get_embedding
 
-# Phase 4 emotional engine
 from continuum.emotion.mappings import build_delta_from_labels
 from continuum.emotion.state_machine import update_emotional_state, EmotionalState
+from continuum.emotion.emotional_arc_engine import EmotionalArcEngine
+from continuum.emotion.emotional_momentum import apply_emotional_momentum
+
+from .fusion_smoothing import FusionSmoother
+from .fusion_engine import fused_response
+
+# Actors mindset imports
+from continuum.actors.storyweaver import Storyweaver
+from continuum.actors.analyst import Analyst
+from continuum.actors.synthesizer import Synthesizer
+from continuum.actors.architect import Architect
 
 
 class ContinuumController:
@@ -36,43 +40,89 @@ class ContinuumController:
       - context management
       - Senate deliberation
       - Jury adjudication
-      - final actor response
+      - Fusion 2.0
+      - Meta‑Persona rewrite
+      - Emotional arcs (Phase 4D)
     """
 
     def __init__(self, *args, **kwargs):
 
+        # ---------------------------------------------------------
+        # Core state
+        # ---------------------------------------------------------
         self.turn_history = []
 
         # Emotional memory
         self.emotional_memory = EmotionalMemory(max_events=20)
 
-        # Phase 4: persistent emotional state
+        # Persistent emotional state
         self.emotional_state = EmotionalState()
 
-        # Lazy-loaded emotion model (initialized on first use)
+        # Emotional Arc Engine
+        self.emotional_arc_engine = EmotionalArcEngine()
+
+        # Fusion smoothing
+        self.fusion_smoother = FusionSmoother(alpha=0.6)
+
+        # Lazy-loaded emotion model
         self.emotion_model = None
 
-        # Narrator mode (used by UI / meta layers)
+        # Narrator mode
         self.narrator_mode = False
 
+        # ---------------------------------------------------------
+        # ACTORS: Senate (Phase 3) + LLM Actors (Phase 4)
+        # ---------------------------------------------------------
+
         # Senate actors
-        actors = [
+        self.senate_actors = [
             SenateArchitect(),
             SenateStoryweaver(),
             SenateAnalyst(),
             SenateSynthesizer(),
         ]
 
-        # Core components
-        self.context = ContinuumContext(conversation_id=str(uuid.uuid4()))
-        self.senate = Senate(actors)
+        # LLM actors
+        self.llm_actors = {
+            "Storyweaver": Storyweaver(),
+            "Analyst": Analyst(),
+            "Synthesizer": Synthesizer(),
+            "Architect": Architect(),
+        }
+
+        self.senate_to_llm_map = {
+            "SenateArchitect": "Architect",
+            "SenateStoryweaver": "Storyweaver",
+            "SenateAnalyst": "Analyst",
+            "SenateSynthesizer": "Synthesizer",
+        }
+
+        # Senate orchestrator
+        self.senate = Senate(self.senate_actors)
+
+        # Jury
         self.jury = Jury()
-        self.actors = {actor.name: actor for actor in actors}
 
-        # Wire embedding function into Jury for emotional alignment
-        self.jury.embed_fn = get_embedding
+        # Controller-level actor lookup
+        self.actors = self.llm_actors
 
-        # Tool registry
+        # ---------------------------------------------------------
+        # Context
+        # ---------------------------------------------------------
+        self.context = ContinuumContext(conversation_id=str(uuid.uuid4()))
+
+        # ---------------------------------------------------------
+        # Embedding function wiring (FIXED)
+        # ---------------------------------------------------------
+        # Define embedding function FIRST
+        self.embed_fn = get_embedding
+
+        # Then inject into Jury
+        self.jury.embed_fn = self.embed_fn
+
+        # ---------------------------------------------------------
+        # Tools
+        # ---------------------------------------------------------
         self.tool_registry = ToolRegistry()
 
         # Persona settings
@@ -82,7 +132,7 @@ class ContinuumController:
             "show_meta_persona": False,
         }
 
-        # Theme settings (used by Streamlit theme panel)
+        # Theme settings
         self.theme_settings = {
             "font_size": "medium",
             "density": "comfortable",
@@ -90,7 +140,7 @@ class ContinuumController:
             "mode": "Continuum",
         }
 
-        # Actor settings (used by Actor Controls Panel)
+        # Actor settings
         self.actor_settings = {
             "SenateArchitect": {"enabled": True, "weight": 1.0},
             "SenateStoryweaver": {"enabled": True, "weight": 1.0},
@@ -98,7 +148,7 @@ class ContinuumController:
             "SenateSynthesizer": {"enabled": True, "weight": 1.0},
         }
 
-        # Traces panel expects these
+        # Debug traces
         self.last_ranked_proposals: List[dict] = []
         self.last_final_proposal: dict | None = None
         self.tool_logs = []
@@ -131,10 +181,6 @@ class ContinuumController:
     # Keyword-based emotion override
     # ---------------------------------------------------------
     def keyword_emotion_override(self, text: str):
-        """
-        Rule-based overrides for common emotional expressions that
-        transformer models often misclassify.
-        """
         text = text.lower()
 
         overrides = {
@@ -164,135 +210,147 @@ class ContinuumController:
     # ---------------------------------------------------------
     def process_message(self, message: str) -> str:
         """
-        Full Continuum pipeline:
+        Full Continuum pipeline (Fusion 2.0 + Emotional Arcs):
         1. Detect emotion + store in EmotionalMemory
-        2. Update Phase 4 Emotional State
-        3. Senate gathers and ranks proposals
-        4. Jury selects the best proposal
-        5. Winning actor generates final response
+        2. Update Emotional State
+        3. Senate deliberation
+        4. Jury adjudication → fusion_weights
+        5. Fusion 2.0 (with smoothing + emotional momentum)
+        6. Meta‑Persona rewrite
+        7. Emotional Arc snapshot
         """
 
-        print("PROCESS_MESSAGE CALLED")
-
-        # ---------------------------------------------------------
-        # 1. Detect emotion (EI‑2.0 format)
-        # ---------------------------------------------------------
-        raw_state = {}
+        # 1. Emotion detection
+        raw_state: Dict[str, float] = {}
         dominant_emotion = ""
         intensity = 0.0
 
         try:
-            # Keyword override first
             override = self.keyword_emotion_override(message)
             if override:
                 label, score = override
                 raw_state = {label: score}
                 dominant_emotion = label
                 intensity = score
-
             else:
-                # Transformer model output
                 raw = self.get_emotion_model()(message)[0]
-
-                # Convert to EI‑2.0 dimension dict
                 raw_state = {entry["label"]: entry["score"] for entry in raw}
-
-                # Dominant emotion
                 dominant_emotion = max(raw_state, key=raw_state.get)
                 intensity = raw_state[dominant_emotion]
-
         except Exception as e:
             print("DEBUG emotion detection failed:", e)
             raw_state = {"neutral": 0.0}
             dominant_emotion = "neutral"
             intensity = 0.0
 
-        # ---------------------------------------------------------
-        # Store EI‑2.0 emotional event
-        # ---------------------------------------------------------
         self.emotional_memory.add_event(
             raw_state=raw_state,
             dominant_emotion=dominant_emotion,
             metadata={"source": "model"},
         )
 
-        # ---------------------------------------------------------
-        # 2. Phase 4 Emotional State Machine Update
-        # ---------------------------------------------------------
-
-        # Optional: reset emotional state for testing (neutral baseline)
+        # 2. Emotional state update
         if self.context.debug_flags.get("reset_emotion_each_message"):
-            self.emotional_state = EmotionalState()  # fresh baseline
+            self.emotional_state = EmotionalState()
 
-        # Compute delta from the new message
         delta = build_delta_from_labels(raw_state)
-
-        # Update emotional state with EI‑2.0 inertia + decay
         self.emotional_state = update_emotional_state(self.emotional_state, delta)
 
-        # Expose emotional state + memory for UI panels
         self.last_emotional_state = self.emotional_state
         self.last_emotional_memory = self.emotional_memory
 
-        print("DEBUG EmotionalState:", self.emotional_state.as_dict())
-
-        # ---------------------------------------------------------
         # 3. Senate deliberation
-        # ---------------------------------------------------------
-        ranked_proposals = self.senate.deliberate(self.context, message, self)
+        ranked_proposals = self.senate.deliberate(
+            context=self.context,
+            message=message,
+            controller=self,
+            emotional_state=self.emotional_state,
+            emotional_memory=self.emotional_memory,
+        )
         self.last_ranked_proposals = ranked_proposals
 
-        # 4. Jury adjudication version EI‑2.0
+        # 4. Jury adjudication
         final_proposal = self.jury.adjudicate(
             ranked_proposals,
             message=message,
-            user_emotion=self.emotional_memory.get_smoothed_state(),  # EI‑2.0
+            user_emotion=self.emotional_memory.get_smoothed_state(),
             memory_summary=self.context.get_memory_summary(),
             emotional_state=EmotionalState.from_dict(self.emotional_state.as_dict()),
         )
-
         self.last_final_proposal = final_proposal
 
-        # 5. Winning actor generates final response
-        actor_name = final_proposal.get("actor")
-        actor = self.actors.get(actor_name)
+        raw_fusion_weights = final_proposal.get("metadata", {}).get("fusion_weights")
 
-        self.meta_persona.voice = self.persona_settings["voice"]
-        self.context.debug_flags["show_meta_persona"] = self.persona_settings["show_meta_persona"]
-
-        if not actor:
-            return "The Continuum encountered an error: unknown actor."
-
-        final_text = actor.respond(
-            context=self.context,
-            proposal=final_proposal,
-            emotional_memory=self.emotional_memory,
-            emotional_state=EmotionalState.from_dict(self.emotional_state.as_dict()),
+        # 5. Fusion smoothing + emotional momentum
+        fusion_weights = self.fusion_smoother.smooth(raw_fusion_weights or {})
+        fusion_weights = apply_emotional_momentum(
+            fusion_weights or {}, self.emotional_arc_engine.get_history()
         )
-        self.last_raw_actor_output = final_text
 
-        # Meta-persona rewrite
+        # 6. Fusion or single actor
+        self.meta_persona.voice = self.persona_settings["voice"]
+        self.context.debug_flags["show_meta_persona"] = self.persona_settings[
+            "show_meta_persona"
+        ]
+
+        if fusion_weights:
+            final_text = fused_response(
+                fusion_weights=fusion_weights,
+                ranked_proposals=ranked_proposals,
+                controller=self,
+            )
+        else:
+            actor_name = final_proposal.get("actor")
+            llm_name = self.senate_to_llm_map.get(actor_name, actor_name)
+            actor = self.actors.get(llm_name)
+
+            if not actor:
+                return "The Continuum encountered an error: unknown actor."
+
+            final_text = actor.respond(
+                context=self.context,
+                selected_proposal=final_proposal,
+                emotional_memory=self.emotional_memory,
+                emotional_state=self.emotional_state,
+            )
+            self.last_raw_actor_output = final_text
+
+            # Update Meta-Persona emotional continuity
+            self.meta_persona.set_emotional_continuity(
+                volatility=self.emotional_state.volatility,
+                confidence=self.emotional_state.confidence,
+                arc_label=self.emotional_arc_engine.classify_arc(),
+            )
+
+        # 7. Meta‑Persona rewrite
         rewritten = self.meta_persona.render(
             final_text,
+            self,
             self.context,
             self.emotional_state,
-            self.emotional_memory,
+            self.emotional_memory
         )
-
-        # Store the rewritten version (not the raw actor output)
         self.context.add_assistant_message(rewritten)
 
-        # Store per-turn metadata for timeline
-        self.turn_history.append({
-            "user": message,
-            "emotion": {
-                "dominant": dominant_emotion,
-                "intensity": intensity,
-                "raw_state": raw_state,
-            },
-            "final_proposal": final_proposal,
-            "assistant": rewritten,
-        })
+        # 8. Emotional Arc snapshot
+        self.emotional_arc_engine.record_snapshot(
+            emotional_state=self.emotional_state,
+            dominant_emotion=dominant_emotion,
+            fusion_weights=fusion_weights or {},
+        )
 
-        # ⭐ return the rewritten output
+        # 9. Turn timeline logging
+        self.turn_history.append(
+            {
+                "user": message,
+                "emotion": {
+                    "dominant": dominant_emotion,
+                    "intensity": intensity,
+                    "raw_state": raw_state,
+                },
+                "final_proposal": final_proposal,
+                "assistant": rewritten,
+            }
+        )
+
         return rewritten

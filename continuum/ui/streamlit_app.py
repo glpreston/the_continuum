@@ -25,8 +25,7 @@ from continuum.ui.panels.decision_breakdown_panel import render_decision_breakdo
 from continuum.ui.panels.decision_matrix_panel import render_decision_matrix
 from continuum.ui.panels.debug_diagnostics_panel import render_debug_diagnostics
 from continuum.ui.panels.meta_persona_debug_tab import render_meta_persona_debug_tab
-
-
+from continuum.ui.panels.emotioinal_arc_panel import render_emotional_arc_panel
 
 
 # ---------------------------------------------------------
@@ -104,7 +103,8 @@ def main():
         "Diagnostics",
         "Decision Matrix",
         "Debug Diagnostics",
-        "Meta‑Persona Debug"
+        "Meta‑Persona Debug",
+        "Emotional Arc"
     ])
 
     # Chat Tab
@@ -163,6 +163,9 @@ def main():
 
     with tabs[4]:
         render_meta_persona_debug_tab(controller)
+
+    with tabs[5]:
+        render_emotional_arc_panel(controller)
 
 
 # ---------------------------------------------------------

@@ -18,7 +18,7 @@ class Senate:
     # ---------------------------------------------------------
     # COLLECT PROPOSALS
     # ---------------------------------------------------------
-    def gather_proposals(self, context, message: str, controller) -> List[Dict[str, Any]]:
+    def gather_proposals(self, context, message: str, controller, emotional_state, emotional_memory) -> List[Dict[str, Any]]:
         proposals: List[Dict[str, Any]] = []
 
         for actor in self.actors:
@@ -28,7 +28,13 @@ class Senate:
 
             try:
                 # 1) Generate the proposal text + metadata
-                proposal = actor.propose(context, message)
+                proposal = actor.propose(
+                    context=context,
+                    message=message,
+                    controller=controller,
+                    emotional_state=emotional_state,
+                    emotional_memory=emotional_memory,
+                )
 
                 # 2) Apply actor weight (J7)
                 weight = controller.actor_settings.get(actor.name, {}).get("weight", 1.0)
@@ -109,7 +115,7 @@ class Senate:
     # ---------------------------------------------------------
     # MAIN ENTRYPOINT
     # ---------------------------------------------------------
-    def deliberate(self, context, message: str, controller) -> List[Dict[str, Any]]:
+    def deliberate(self, context, message: str, controller, emotional_state, emotional_memory) -> List[Dict[str, Any]]:
         """
         Full Senate pipeline:
         1. Gather proposals
@@ -119,7 +125,14 @@ class Senate:
         5. Return the ranked list to the Jury
         """        
         # 1. Gather proposals
-        proposals = self.gather_proposals(context, message, controller)
+        proposals = self.gather_proposals(
+            context=context,
+            message=message,
+            controller=controller,
+            emotional_state=emotional_state,
+            emotional_memory=emotional_memory,
+        )
+
         controller.context.debug_flags["raw_proposals"] = proposals #J(9)
 
         # 2. Filter proposals
