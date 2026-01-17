@@ -42,3 +42,25 @@ class Analyst(BaseLLMActor):
         Analyst tends to be more confident due to structured reasoning.
         """
         return 0.92
+    
+    def propose(self, context, message, controller, emotional_state, emotional_memory):
+        """
+        Senate-aware proposal method.
+        Ensures controller and message are passed through to BaseLLMActor.
+        """
+
+        llm_proposal = super().propose(
+            context=context,
+            emotional_state=emotional_state,
+            emotional_memory=emotional_memory,
+            message=message,
+            controller=controller,
+        )
+
+        # Optional: actor-specific confidence logic
+        if hasattr(self, "compute_confidence"):
+            llm_proposal["confidence"] = self.compute_confidence(
+                llm_proposal.get("reasoning", [])
+            )
+
+        return llm_proposal    

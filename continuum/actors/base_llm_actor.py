@@ -95,30 +95,92 @@ class BaseLLMActor(BaseActor):
     # ------------------------------------------------------------------
     def propose(
         self,
-        context: Any,
-        emotional_state: Any,
-        emotional_memory: Any,
+        context,
+        emotional_state,
+        emotional_memory,
+        message=None,
+        controller=None,
         **kwargs,
-    ) -> Dict[str, Any]:
+    ):
         """
         Generate a structured proposal using the actor's LLM.
-        This overrides BaseActor.propose() but keeps the same return format.
+        Senate-aware: requires controller and message.
         """
 
-        model_name = self.select_model(context, emotional_state)
-        prompt = self.build_prompt(context, emotional_state, emotional_memory, **kwargs)
+        if controller is None:
+            raise ValueError("BaseLLMActor.propose() requires a controller instance.")
 
-        llm_output = self.llm.generate(prompt, model=model_name)
+        # Select model using registry
+        model_info = controller.registry.find_best_match(self.name)
+        if not model_info:
+            return {
+                "actor": self.name,
+                "content": "[ERROR] No available model for actor: " + self.name,
+                "confidence": 0.0,
+                "reasoning": ["Model registry returned no match"],
+                "metadata": {"type": "llm_actor"},
+            }
+
+        # Build prompt
+        prompt = self.build_prompt(
+            context=context,
+            emotional_state=emotional_state,
+            emotional_memory=emotional_memory,
+            message=message,
+            controller=controller,
+            **kwargs,
+        )
+
+        # Generate output using the selected node + model
+        llm_output = model_info.node.generate(
+            prompt=prompt,
+            model=model_info.name,
+        )
 
         return {
             "actor": self.name,
             "content": llm_output,
-            "confidence": 0.85,  # LLM actors can override this later
-            "reasoning": ["LLM‑generated proposal"],  # placeholder for Senate/Jury
+            "confidence": 0.85,  # Actors override this
+            "reasoning": ["LLM-generated proposal"],
             "metadata": {
-                "model": model_name,
+                "model": model_info.name,
                 "prompt_used": prompt,
                 "type": "llm_actor",
                 "persona": self.persona,
             },
         }
+
+    # ------------------------------------------------------------------
+    # Phase‑4: LLM-powered final response (Fusion 2.0)
+    # ------------------------------------------------------------------
+    def respond(
+        self,
+        context: Any,
+        selected_proposal: Dict[str, Any],
+        emotional_memory: Any,
+        emotional_state: Any,
+    ) -> str:
+        """
+        Generate the actor's final response during Fusion 2.0.
+        This is DIFFERENT from propose(): it rewrites or expands the
+        selected proposal rather than generating a new one.
+        """
+
+        # Extract proposal content
+        base_text = selected_proposal.get("content", "")
+
+        # Build a prompt that includes the proposal text
+        prompt = self.build_prompt(
+            context=context,
+            emotional_state=emotional_state,
+            emotional_memory=emotional_memory,
+            proposal_text=base_text,
+        )
+
+        # Select model
+        model_name = self.select_model(context, emotional_state)
+
+        # Generate final text
+        llm_output = self.llm.generate(prompt, model=model_name)
+
+        return llm_output

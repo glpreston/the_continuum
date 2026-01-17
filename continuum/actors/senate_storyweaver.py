@@ -1,3 +1,4 @@
+# continuum/actors/senate_storyweaver.py
 from continuum.actors.base_actor import BaseActor
 from continuum.actors.storyweaver import Storyweaver
 
@@ -12,13 +13,25 @@ class SenateStoryweaver(BaseActor):
         super().__init__("SenateStoryweaver")
         self.llm_actor = Storyweaver()
 
-    def propose(self, context, message, controller, emotional_state, emotional_memory):
+    def propose(
+        self,
+        context,
+        message,
+        controller,
+        emotional_state,
+        emotional_memory,
+    ):
         llm_proposal = self.llm_actor.propose(
             context=context,
+            message=message,
+            controller=controller,
             emotional_state=emotional_state,
             emotional_memory=emotional_memory,
         )
 
+
+
+        # Tag as Senate output
         llm_proposal["actor"] = "SenateStoryweaver"
         llm_proposal["metadata"]["senate_actor"] = True
 
