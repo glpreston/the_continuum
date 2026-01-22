@@ -44,6 +44,10 @@ logs/
 Thumbs.db
 desktop.ini
 
+# Local secrets
+secrets/
+
+
 [user]
     name = glpreston
     email = georgezpreston@gmail.com

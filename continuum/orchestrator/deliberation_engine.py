@@ -27,6 +27,9 @@ class DeliberationEngine:
         self.last_ranked_proposals: List[dict] = []
         self.last_final_proposal: dict | None = None
 
+        log_error("🔥🔥🔥 DELIBERATION ENGINE INITIALIZED 🔥🔥🔥", phase="delib")
+        log_debug("[DELIB] Senate + Jury wired into DeliberationEngine", phase="delib")
+
     # ---------------------------------------------------------
     # MAIN ENTRY POINT
     # ---------------------------------------------------------
@@ -47,9 +50,15 @@ class DeliberationEngine:
         """
 
         # -------------------------
+        # ENTRY MARKER
+        # -------------------------
+        log_error("🔥🔥🔥 ENTERED DeliberationEngine.run() 🔥🔥🔥", phase="delib")
+        log_info("[DELIB] Starting Senate → Jury pipeline", phase="delib")
+
+        # -------------------------
         # 1. Senate deliberation
         # -------------------------
-        log_info("Starting Senate deliberation", phase="senate")
+        log_error("🔥🔥🔥 CALLING SENATE.deliberate() 🔥🔥🔥", phase="senate")
 
         ranked_proposals = self.senate.deliberate(
             context=context,
@@ -61,19 +70,26 @@ class DeliberationEngine:
 
         self.last_ranked_proposals = ranked_proposals
 
+        # --- DEBUG: Senate output ---
         log_debug(
-            f"Senate produced {len(ranked_proposals)} proposals",
+            f"[DELIB] Senate produced {len(ranked_proposals)} proposals",
             phase="senate",
         )
+        log_debug(
+            f"[DELIB] Ranked proposals dump: {ranked_proposals}",
+            phase="senate",
+        )
+        # ----------------------------
 
         if not ranked_proposals:
-            log_error("Senate returned no proposals", phase="senate")
+            log_error("🔥🔥🔥 ERROR: Senate returned NO proposals 🔥🔥🔥", phase="senate")
             return [], {}
 
         # -------------------------
         # 2. Jury adjudication
         # -------------------------
-        log_info("Starting Jury adjudication", phase="jury")
+        log_error("🔥🔥🔥 CALLING JURY.adjudicate() 🔥🔥🔥", phase="jury")
+        log_info("[DELIB] Starting Jury adjudication", phase="jury")
 
         final_proposal = self.jury.adjudicate(
             ranked_proposals,
@@ -85,9 +101,38 @@ class DeliberationEngine:
 
         self.last_final_proposal = final_proposal
 
+        # --- DEBUG: Jury output ---
         log_debug(
-            f"Jury selected proposal from actor={final_proposal.get('actor')}",
+            f"[DELIB] Jury final proposal: {final_proposal}",
             phase="jury",
         )
 
+        metadata = final_proposal.get("metadata", {})
+        fusion_weights = metadata.get("fusion_weights", None)
+
+        log_debug(
+            f"[DELIB] Final proposal metadata: {metadata}",
+            phase="jury",
+        )
+        log_debug(
+            f"[DELIB] Extracted fusion_weights: {fusion_weights}",
+            phase="jury",
+        )
+
+        # Fusion weight warnings
+        if fusion_weights is None:
+            log_error(
+                "🔥🔥🔥 WARNING: final_proposal contains NO fusion_weights field! 🔥🔥🔥",
+                phase="jury",
+            )
+        elif fusion_weights == {}:
+            log_error(
+                "🔥🔥🔥 WARNING: fusion_weights is EMPTY {} — Fusion will fallback or fail. 🔥🔥🔥",
+                phase="jury",
+            )
+
+        # ---------------------------
+        # RETURN
+        # ---------------------------
+        log_error("🔥🔥🔥 DELIBERATION ENGINE RETURNING RESULTS 🔥🔥🔥", phase="delib")
         return ranked_proposals, final_proposal

@@ -1,37 +1,53 @@
 # continuum/actors/base_llm_actor.py
 
 import os
-from typing import Any, Dict, Optional
+from typing import Any
 
 from continuum.actors.base_actor import BaseActor
-from continuum.llm.llm_client import LLMClient
 
 
 class BaseLLMActor(BaseActor):
     """
-    Extension of the Phase‑3 BaseActor that adds:
-    - Prompt template loading
-    - Emotional + memory injection
-    - Dynamic model selection
-    - LLM proposal generation
-
-    This class does NOT replace BaseActor.
-    It simply adds LLM capability for Storyweaver, Analyst, Synthesizer, Architect.
+    DB‑driven LLM actor base class.
+    Fusion‑2.1 version:
+    - Persona prompt is treated as a system instruction
+    - User message is appended after the persona prompt
+    - No context/emotion/memory injection
     """
 
-    def __init__(self, name: str, prompt_file: str, persona: Optional[Dict[str, Any]] = None):
+    def __init__(
+        self,
+        name: str,
+        prompt_file: str,
+        persona: dict,
+        model_name: str,
+        fallback_model: str,
+        system_prompt: str,
+        temperature: float,
+        max_tokens: int,
+        controller,
+    ):
         super().__init__(name, persona)
+
+        # Load persona prompt
         self.prompt_file = prompt_file
         self.prompt_template = self._load_prompt_template()
-        self.llm = LLMClient()
+
+        # DB-driven fields
+        self.model_name = model_name
+        self.fallback_model = fallback_model
+        self.system_prompt = system_prompt
+        self.temperature = temperature
+        self.max_tokens = max_tokens
+
+        # Controller + registry
+        self.controller = controller
+        self.registry = controller.registry
 
     # ------------------------------------------------------------------
     # Template loading
     # ------------------------------------------------------------------
     def _load_prompt_template(self) -> str:
-        """
-        Load the actor's prompt template from /actors/prompts/.
-        """
         base_dir = os.path.dirname(os.path.abspath(__file__))
         prompt_path = os.path.join(base_dir, "prompts", self.prompt_file)
 
@@ -39,20 +55,10 @@ class BaseLLMActor(BaseActor):
             raise FileNotFoundError(f"Prompt file not found: {prompt_path}")
 
         with open(prompt_path, "r", encoding="utf-8") as f:
-            return f.read()
+            return f.read().strip()
 
     # ------------------------------------------------------------------
-    # Model selection (override per actor)
-    # ------------------------------------------------------------------
-    def select_model(self, context, emotional_state) -> str:
-        """
-        Default model selection logic.
-        Subclasses override this to choose their preferred LLM.
-        """
-        return "default"
-
-    # ------------------------------------------------------------------
-    # Prompt construction
+    # Fusion‑2.1: persona prompt only
     # ------------------------------------------------------------------
     def build_prompt(
         self,
@@ -62,36 +68,18 @@ class BaseLLMActor(BaseActor):
         **kwargs,
     ) -> str:
         """
-        Fill the actor's prompt template with dynamic values.
+        Fusion‑2.1: return persona template exactly as-is.
         """
-
-        # Emotional state
-        dominant = getattr(emotional_state, "label", "neutral")
-
-        # Memory summaries
-        memory_text = ""
-        if emotional_memory and hasattr(emotional_memory, "summaries"):
-            memory_text = "\n".join(emotional_memory.summaries[-5:])
-
-        # Context window
-        context_text = (
-            context.get_text_window()
-            if hasattr(context, "get_text_window")
-            else ""
-        )
-
-        # Inject values into the template
-        prompt = self.prompt_template.format(
-            context=context_text,
-            dominant_emotion=dominant,
-            memory=memory_text,
-            **kwargs,
-        )
-
-        return prompt
+        return self.prompt_template
 
     # ------------------------------------------------------------------
-    # LLM‑powered proposal generation
+    # Optional postprocess hook
+    # ------------------------------------------------------------------
+    def _postprocess(self, text: str) -> str:
+        return text.strip()
+
+    # ------------------------------------------------------------------
+    # Proposal generation (Senate stage)
     # ------------------------------------------------------------------
     def propose(
         self,
@@ -102,27 +90,21 @@ class BaseLLMActor(BaseActor):
         controller=None,
         **kwargs,
     ):
-        """
-        Generate a structured proposal using the actor's LLM.
-        Senate-aware: requires controller and message.
-        """
-
         if controller is None:
             raise ValueError("BaseLLMActor.propose() requires a controller instance.")
 
-        # Select model using registry
-        model_info = controller.registry.find_best_match(self.name)
+        model_info = controller.registry.get(self.model_name)
         if not model_info:
             return {
                 "actor": self.name,
-                "content": "[ERROR] No available model for actor: " + self.name,
+                "content": f"[ERROR] No model found: {self.model_name}",
                 "confidence": 0.0,
                 "reasoning": ["Model registry returned no match"],
                 "metadata": {"type": "llm_actor"},
             }
 
-        # Build prompt
-        prompt = self.build_prompt(
+        # Build system-style prompt for Ollama
+        persona_prompt = self.build_prompt(
             context=context,
             emotional_state=emotional_state,
             emotional_memory=emotional_memory,
@@ -131,56 +113,74 @@ class BaseLLMActor(BaseActor):
             **kwargs,
         )
 
-        # Generate output using the selected node + model
-        llm_output = model_info.node.generate(
-            prompt=prompt,
-            model=model_info.name,
+        # Combine persona + user message
+        combined_prompt = (
+            persona_prompt
+            + "\n\nUser message:\n"
+            + str(message).strip()
+            + "\n\nAssistant:"
         )
+
+        # Debug: show full prompt sent to Ollama
+        if getattr(controller.context, "debug_flags", {}).get("show_prompts"):
+            print("\n================= DEBUG: FULL PROMPT =================")
+            print(combined_prompt)
+            print("=====================================================\n")
+
+        # Generate LLM output
+        llm_output = model_info.node.generate(
+            prompt=combined_prompt,
+            temperature=self.temperature,
+            max_tokens=self.max_tokens,
+        )
+
+        # Debug: raw LLM output BEFORE postprocessing
+        if getattr(controller.context, "debug_flags", {}).get("show_prompts"):
+            print(f"\n=== DEBUG LLM RAW OUTPUT ({self.name}) ===")
+            print(repr(llm_output))
+            print("==========================================\n")
+
+        # Postprocess
+        clean = self._postprocess(llm_output)
+
+        # Debug: cleaned proposal
+        if getattr(controller.context, "debug_flags", {}).get("show_prompts"):
+            print(f"\n=== DEBUG RAW PROPOSAL ({self.name}) ===")
+            print(clean)
+            print("=======================================\n")
 
         return {
             "actor": self.name,
-            "content": llm_output,
-            "confidence": 0.85,  # Actors override this
+            "content": clean,
+            "confidence": 0.85,
             "reasoning": ["LLM-generated proposal"],
             "metadata": {
                 "model": model_info.name,
-                "prompt_used": prompt,
+                "prompt_used": persona_prompt,
                 "type": "llm_actor",
                 "persona": self.persona,
             },
         }
 
     # ------------------------------------------------------------------
-    # Phase‑4: LLM-powered final response (Fusion 2.0)
+    # Fusion‑2.1 final response (raw prompt → model → text)
     # ------------------------------------------------------------------
-    def respond(
-        self,
-        context: Any,
-        selected_proposal: Dict[str, Any],
-        emotional_memory: Any,
-        emotional_state: Any,
-    ) -> str:
-        """
-        Generate the actor's final response during Fusion 2.0.
-        This is DIFFERENT from propose(): it rewrites or expands the
-        selected proposal rather than generating a new one.
-        """
+    def respond(self, prompt: str, **kwargs) -> str:
 
-        # Extract proposal content
-        base_text = selected_proposal.get("content", "")
+        # Debug: show Fusion prompt
+        if getattr(self.controller.context, "debug_flags", {}).get("show_prompts"):
+            print("\n================= DEBUG: FUSION PROMPT =================")
+            print(prompt)
+            print("========================================================\n")
 
-        # Build a prompt that includes the proposal text
-        prompt = self.build_prompt(
-            context=context,
-            emotional_state=emotional_state,
-            emotional_memory=emotional_memory,
-            proposal_text=base_text,
+        model_info = self.registry.get(self.model_name)
+        if not model_info:
+            return f"[ERROR] No model found: {self.model_name}"
+
+        output = model_info.node.generate(
+            prompt=prompt,
+            temperature=self.temperature,
+            max_tokens=self.max_tokens,
         )
 
-        # Select model
-        model_name = self.select_model(context, emotional_state)
-
-        # Generate final text
-        llm_output = self.llm.generate(prompt, model=model_name)
-
-        return llm_output
+        return self._postprocess(output)

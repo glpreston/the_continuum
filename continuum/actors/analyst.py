@@ -1,54 +1,45 @@
 # continuum/actors/analyst.py
-
+import re
 from continuum.actors.base_llm_actor import BaseLLMActor
 
 
 class Analyst(BaseLLMActor):
-    """
-    The Analyst actor:
-    - Performs logical breakdowns
-    - Identifies assumptions and implications
-    - Prefers deterministic, low‑temperature models
-    - Produces structured, concise analytical proposals
-    """
-
-    def __init__(self):
+    def __init__(
+        self,
+        name,
+        model_name,
+        fallback_model,
+        personality,
+        system_prompt,
+        temperature,
+        max_tokens,
+        controller,
+    ):
         super().__init__(
-            name="Analyst",
-            prompt_file="analyst.txt",
-            persona={
-                "style": "logical, structured, assumption‑aware",
-                "goal": "interpret the user's message with clarity and precision",
-            },
+            name=name,
+            prompt_file="analyst_prompt.txt",
+            persona=personality,
+            model_name=model_name,
+            fallback_model=fallback_model,
+            system_prompt=system_prompt,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            controller=controller,
         )
 
     # ---------------------------------------------------------
     # Model selection
     # ---------------------------------------------------------
     def select_model(self, context, emotional_state):
-        """
-        Analyst prefers stable, deterministic models.
-        Later you can expand this to:
-        - switch models based on emotional intensity
-        - use smaller models when GPU is busy
-        """
-        return "deterministic"
+        return self.model_name  # DB-driven model
 
     # ---------------------------------------------------------
     # Optional: adjust confidence scoring
     # ---------------------------------------------------------
     def compute_confidence(self, steps):
-        """
-        Analyst tends to be more confident due to structured reasoning.
-        """
         return 0.92
-    
-    def propose(self, context, message, controller, emotional_state, emotional_memory):
-        """
-        Senate-aware proposal method.
-        Ensures controller and message are passed through to BaseLLMActor.
-        """
 
+    def propose(self, context, message, controller, emotional_state, emotional_memory):
         llm_proposal = super().propose(
             context=context,
             emotional_state=emotional_state,
@@ -57,10 +48,35 @@ class Analyst(BaseLLMActor):
             controller=controller,
         )
 
-        # Optional: actor-specific confidence logic
-        if hasattr(self, "compute_confidence"):
-            llm_proposal["confidence"] = self.compute_confidence(
-                llm_proposal.get("reasoning", [])
-            )
+        llm_proposal["confidence"] = self.compute_confidence(
+            llm_proposal.get("reasoning", [])
+        )
 
-        return llm_proposal    
+        return llm_proposal
+
+    # ---------------------------------------------------------
+    # Fusion-friendly response generation (Fusion 2.1)
+    # ---------------------------------------------------------
+    def respond(self, prompt: str, **kwargs) -> str:
+        """
+        Produce a short, single-paragraph analytical interpretation.
+        This is intentionally concise so Fusion can blend it cleanly.
+        """
+        raw = super().respond(prompt, **kwargs)
+        return self._postprocess(raw)
+
+    def _postprocess(self, text: str) -> str:
+        import re
+
+        # Remove markdown bullets and numbered lists
+        text = re.sub(r'[\*\-\•]+', ' ', text)          # bullets
+        text = re.sub(r'\n?\s*\d+\.\s+', ' ', text)     # numbered lists
+
+        # Strip common analysis boilerplate
+        text = re.sub(r"The user's message can be analyzed as follows:?", ' ', text, flags=re.IGNORECASE)
+        text = re.sub(r"That's a clear( and also)? concise proposal!? ?", ' ', text, flags=re.IGNORECASE)
+        text = re.sub(r"Title:\s*[^\.!\n]+", ' ', text, flags=re.IGNORECASE)
+
+        # Collapse whitespace and keep it to a single paragraph
+        text = re.sub(r'\s+', ' ', text).strip()
+        return text

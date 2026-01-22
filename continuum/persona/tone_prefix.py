@@ -1,6 +1,6 @@
-# continuum/personatone_prefix.py  
-from continuum.emotion.state_machine import EmotionalState
+# continuum/persona/tone_prefix.py
 
+from continuum.emotion.state_machine import EmotionalState
 
 def compute_dominant_emotion(emotional_state: EmotionalState) -> str:
     state_dict = emotional_state.as_dict()
@@ -20,19 +20,9 @@ def compute_dominant_emotion(emotional_state: EmotionalState) -> str:
 
 
 def tone_prefix(dominant: str, volatility: float, confidence: float) -> str:
-    if volatility > 0.55:
-        return "Let’s slow down and take this step by step. "
-
-    if dominant in ("sadness", "fatigue"):
-        return "I’m moving gently with you here. "
-
-    if dominant == "confusion":
-        return "Let’s bring some clarity to this. "
-
-    if dominant in ("anxiety", "nervousness"):
-        return "We can keep things grounded. "
-
-    if dominant == "curiosity":
-        return "Let’s explore this together. "
-
+    """
+    Fusion 2.1: emotional modulation should NOT prepend sentences.
+    This function now returns an empty string so the fused text
+    remains clean and neutral before rewriting.
+    """
     return ""

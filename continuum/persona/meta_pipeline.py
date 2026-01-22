@@ -40,7 +40,13 @@ class MetaPipeline:
             arc_label=controller.emotional_arc_engine.classify_arc(),
         )
 
-        # Apply rewrite
+        # Apply rewrite (corrected argument order)
+        #rewritten = self.meta_persona.render(
+         #   text,
+         #   controller.context,
+         #   controller.emotional_state,
+        #)
+
         rewritten = self.meta_persona.render(
             text,
             controller,

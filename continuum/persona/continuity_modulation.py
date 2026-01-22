@@ -1,7 +1,6 @@
-# continuum/personacontinuity_modulation.py 
+# continuum/persona/continuity_modulation.py
 
 from typing import Dict, List, Any
-
 
 def apply_continuity_modulation(
     text: str,
@@ -10,34 +9,26 @@ def apply_continuity_modulation(
     arc_label: str,
     style: Dict[str, float],
 ) -> str:
-    tone_modifiers: List[str] = []
+    """
+    Fusion 2.1: continuity modulation should adjust style parameters only.
+    It must NOT prepend sentences or inject instructional text.
+    """
 
-    if volatility > 0.25:
-        tone_modifiers.append("Keep sentences short and stabilizing.")
-
-    if confidence < 0.4:
-        tone_modifiers.append("Use a warm, reassuring tone.")
-
-    if "Curiosity" in arc_label:
-        tone_modifiers.append("Lean into exploratory, imaginative language.")
-    elif "Tension" in arc_label:
-        tone_modifiers.append("Be calming, structured, and steady.")
-    elif "Calm" in arc_label:
-        tone_modifiers.append("Maintain a smooth, flowing narrative.")
-    elif "Recovery" in arc_label:
-        tone_modifiers.append("Acknowledge progress and reinforce stability.")
-
+    # Adjust style weights only — no text injection
     if volatility > 0.3:
         style["brevity"] += 0.2
 
     if confidence < 0.4:
         style["softness"] += 0.2
 
-    modifier_text = " ".join(tone_modifiers).strip()
-    if modifier_text:
-        # Add a trailing period so it’s a complete sentence and less likely to be rewritten oddly
-        if not modifier_text.endswith("."):
-            modifier_text += "."
-        text = f"{modifier_text} {text}"
+    # Optional: arc-based style nudges (no text added)
+    if "Curiosity" in arc_label:
+        style["creativity"] += 0.1
+    elif "Tension" in arc_label:
+        style["clarity"] += 0.1
+    elif "Calm" in arc_label:
+        style["smoothness"] = style.get("smoothness", 0) + 0.1
+    elif "Recovery" in arc_label:
+        style["warmth"] += 0.1
 
     return text

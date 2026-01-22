@@ -1,26 +1,19 @@
 # continuum/actors/senate_synthesizer.py
-from continuum.actors.base_actor import BaseActor
-from continuum.actors.synthesizer import Synthesizer
+
+from continuum.actors.senate_base import SenateBase
 
 
-class SenateSynthesizer(BaseActor):
+class SenateSynthesizer(SenateBase):
     """
     Phase‑4 Senate wrapper for the Synthesizer LLM actor.
-    Delegates proposal generation to the LLM actor.
+    Delegates proposal generation to the underlying LLM actor.
     """
 
-    def __init__(self):
-        super().__init__("SenateSynthesizer")
-        self.llm_actor = Synthesizer()
+    def __init__(self, llm_actor):
+        super().__init__(llm_actor, "SenateSynthesizer")
 
-    def propose(
-        self,
-        context,
-        message,
-        controller,
-        emotional_state,
-        emotional_memory,
-    ):
+    def propose(self, context, message, controller, emotional_state, emotional_memory):
+        # Delegate to the underlying actor
         llm_proposal = self.llm_actor.propose(
             context=context,
             message=message,

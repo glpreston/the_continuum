@@ -3,7 +3,7 @@
 from typing import List, Dict, Any
 from sklearn.feature_extraction.text import TfidfVectorizer
 from continuum.persona.topics import detect_topic, TOPIC_ACTOR_WEIGHTS
-
+from continuum.core.logger import log_info, log_debug, log_error
 
 
 class Senate:
@@ -14,6 +14,8 @@ class Senate:
 
     def __init__(self, actors: List[Any]):
         self.actors = actors
+        log_error("🔥🔥🔥 SENATE.__init__() CALLED 🔥🔥🔥", phase="senate")
+        log_debug(f"[SENATE] Initialized with actors: {[a.name for a in actors]}", phase="senate")
 
     # ---------------------------------------------------------
     # COLLECT PROPOSALS
@@ -21,13 +23,20 @@ class Senate:
     def gather_proposals(self, context, message: str, controller, emotional_state, emotional_memory) -> List[Dict[str, Any]]:
         proposals: List[Dict[str, Any]] = []
 
+        log_error("🔥🔥🔥 ENTERED gather_proposals() 🔥🔥🔥", phase="senate")
+        log_info("[SENATE] Gathering proposals from actors", phase="senate")
+
         for actor in self.actors:
+
             # Skip disabled actors (J7)
             if not controller.actor_settings.get(actor.name, {}).get("enabled", True):
+                log_debug(f"[SENATE] Actor {actor.name} is disabled — skipping", phase="senate")
                 continue
 
             try:
                 # 1) Generate the proposal text + metadata
+                log_debug(f"[SENATE] Calling propose() on {actor.name}", phase="senate")
+
                 proposal = actor.propose(
                     context=context,
                     message=message,
@@ -35,6 +44,8 @@ class Senate:
                     emotional_state=emotional_state,
                     emotional_memory=emotional_memory,
                 )
+
+                log_debug(f"[SENATE] Raw proposal from {actor.name}: {proposal}", phase="senate")
 
                 # 2) Apply actor weight (J7)
                 weight = controller.actor_settings.get(actor.name, {}).get("weight", 1.0)
@@ -52,6 +63,7 @@ class Senate:
                 proposals.append(proposal)
 
             except Exception as e:
+                log_error(f"🔥🔥🔥 ERROR in actor {actor.name}: {e} 🔥🔥🔥", phase="senate")
                 proposals.append({
                     "actor": actor.name,
                     "content": None,
@@ -62,50 +74,46 @@ class Senate:
                     },
                 })
 
+        log_error(f"🔥🔥🔥 gather_proposals() COMPLETE — {len(proposals)} proposals 🔥🔥🔥", phase="senate")
         return proposals
 
     # ---------------------------------------------------------
     # FILTER PROPOSALS
     # ---------------------------------------------------------
     def filter_proposals(self, proposals: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """
-        Remove proposals with no content or zero confidence.
-        """
-        return [
+        filtered = [
             p for p in proposals
             if p.get("content") and p.get("confidence", 0) > 0
         ]
+
+        log_debug(f"[SENATE] Filtered proposals: kept {len(filtered)} of {len(proposals)}", phase="senate")
+        return filtered
 
     # ---------------------------------------------------------
     # RANK PROPOSALS
     # ---------------------------------------------------------
     def rank_proposals(self, proposals: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """
-        Sort proposals by confidence, descending.
-        """
-        return sorted(proposals, key=lambda p: p.get("confidence", 0), reverse=True)
+        ranked = sorted(proposals, key=lambda p: p.get("confidence", 0), reverse=True)
+        log_debug(f"[SENATE] Ranked proposals (top first): {ranked}", phase="senate")
+        return ranked
 
     # ---------------------------------------------------------
     # J11: SIMILARITY MATRIX
     # ---------------------------------------------------------
     def compute_similarity_matrix(self, proposals):
-        """
-        Computes cosine similarity between actor proposal contents.
-        Returns a dict with:
-          - 'actors': list of actor names
-          - 'matrix': 2D list of similarity scores
-        """
-
         actors = [p.get("actor", "unknown") for p in proposals]
         texts = [p.get("content", "") or "" for p in proposals]
 
         if len(texts) < 2:
+            log_debug("[SENATE] Only one proposal — similarity matrix trivial", phase="senate")
             return {"actors": actors, "matrix": [[1.0]]}
 
         vectorizer = TfidfVectorizer()
         tfidf = vectorizer.fit_transform(texts)
 
         sim_matrix = (tfidf * tfidf.T).toarray()
+
+        log_debug(f"[SENATE] Similarity matrix computed: {sim_matrix}", phase="senate")
 
         return {
             "actors": actors,
@@ -116,14 +124,9 @@ class Senate:
     # MAIN ENTRYPOINT
     # ---------------------------------------------------------
     def deliberate(self, context, message: str, controller, emotional_state, emotional_memory) -> List[Dict[str, Any]]:
-        """
-        Full Senate pipeline:
-        1. Gather proposals
-        2. Filter out empty ones
-        3. Rank by confidence
-        4. Compute similarity matrix (J11)
-        5. Return the ranked list to the Jury
-        """        
+        log_error("🔥🔥🔥 ENTERED Senate.deliberate() 🔥🔥🔥", phase="senate")
+        log_info("[SENATE] Starting Senate.deliberate()", phase="senate")
+
         # 1. Gather proposals
         proposals = self.gather_proposals(
             context=context,
@@ -133,17 +136,21 @@ class Senate:
             emotional_memory=emotional_memory,
         )
 
-        controller.context.debug_flags["raw_proposals"] = proposals #J(9)
+        log_debug(f"[SENATE] Raw proposals stored in debug_flags", phase="senate")
+        controller.context.debug_flags["raw_proposals"] = proposals
 
         # 2. Filter proposals
         filtered = self.filter_proposals(proposals)
-        controller.context.debug_flags["filtered_proposals"] = filtered #J(9)
+        controller.context.debug_flags["filtered_proposals"] = filtered
 
-        # ---------------------------------------------------------
-        # NEW: Topic detection + topic-aware confidence shaping
-        # ---------------------------------------------------------
+        log_error(f"🔥🔥🔥 FILTERED PROPOSALS COUNT = {len(filtered)} 🔥🔥🔥", phase="senate")
+
+        # 3. Topic detection + topic-aware confidence shaping
         topic = detect_topic(message)
         topic_weights = TOPIC_ACTOR_WEIGHTS.get(topic, {})
+
+        log_debug(f"[SENATE] Detected topic: {topic}", phase="senate")
+        log_debug(f"[SENATE] Topic weights: {topic_weights}", phase="senate")
 
         for p in filtered:
             actor = p.get("actor")
@@ -153,11 +160,14 @@ class Senate:
         controller.context.debug_flags["topic"] = topic
         controller.context.debug_flags["topic_weights"] = topic_weights
 
-        # 3. Rank proposals
+        # 4. Rank proposals
         ranked = self.rank_proposals(filtered)
 
-        # 4. Similarity matrix
+        # 5. Similarity matrix
         similarity = self.compute_similarity_matrix(ranked)
         controller.context.debug_flags["similarity_matrix"] = similarity
 
-        return ranked        
+        log_error(f"🔥🔥🔥 SENATE RETURNING {len(ranked)} RANKED PROPOSALS 🔥🔥🔥", phase="senate")
+        log_debug(f"[SENATE] Final ranked list: {ranked}", phase="senate")
+
+        return ranked

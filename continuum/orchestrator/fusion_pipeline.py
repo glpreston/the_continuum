@@ -89,6 +89,21 @@ class FusionPipeline:
             self.last_final_text = final_text
             return final_text
 
+
+        # -------------------------
+        # FALLBACK: SINGLE ACTOR
+        # -------------------------
+        log_debug(
+            f"[FUSION FALLBACK] fusion_weights empty. Ranked proposals: {ranked_proposals}",
+            phase="fusion",
+        )
+
+        log_debug(
+            f"[FUSION FALLBACK] First proposal actor: {ranked_proposals[0].get('actor')}",
+            phase="fusion",
+        )
+
+
         # -------------------------
         # FALLBACK: SINGLE ACTOR
         # -------------------------
@@ -98,6 +113,19 @@ class FusionPipeline:
         actor_name = final_proposal.get("actor")
         llm_name = controller.senate_to_llm_map.get(actor_name, actor_name)
         actor = controller.actors.get(llm_name)
+
+        log_debug(
+            f"[FUSION FALLBACK] Using actor '{llm_name}' for fallback generation.",
+            phase="fusion",
+        )
+
+
+        log_debug(
+            f"[FUSION FALLBACK] Actor returned text: {final_text}",
+            phase="fusion",
+        )
+
+
 
         if not actor:
             log_error(

@@ -1,55 +1,45 @@
 # continuum/actors/synthesizer.py
-
+import re
 from continuum.actors.base_llm_actor import BaseLLMActor
 
 
 class Synthesizer(BaseLLMActor):
-    """
-    The Synthesizer actor:
-    - Integrates multiple perspectives
-    - Resolves tensions between emotional and analytical signals
-    - Prefers balanced, generalist LLMs
-    - Produces coherent, middle‑path interpretations
-    """
-
-    def __init__(self):
+    def __init__(
+        self,
+        name,
+        model_name,
+        fallback_model,
+        personality,
+        system_prompt,
+        temperature,
+        max_tokens,
+        controller,
+    ):
         super().__init__(
-            name="Synthesizer",
-            prompt_file="synthesizer.txt",
-            persona={
-                "style": "balanced, integrative, reflective",
-                "goal": "blend emotional and analytical cues into a coherent interpretation",
-            },
+            name=name,
+            prompt_file="synthesizer_prompt.txt",
+            persona=personality,
+            model_name=model_name,
+            fallback_model=fallback_model,
+            system_prompt=system_prompt,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            controller=controller,
         )
 
     # ---------------------------------------------------------
     # Model selection
     # ---------------------------------------------------------
     def select_model(self, context, emotional_state):
-        """
-        Synthesizer prefers balanced, generalist models.
-        Later you can expand this to:
-        - choose models based on emotional volatility
-        - switch to smaller models when GPU is busy
-        """
-        return "balanced"
+        return self.model_name  # DB-driven model
 
     # ---------------------------------------------------------
     # Optional: adjust confidence scoring
     # ---------------------------------------------------------
     def compute_confidence(self, steps):
-        """
-        Synthesizer is steady and moderate.
-        Confidence reflects integrative reasoning.
-        """
-        return 0.88
-    
-    def propose(self, context, message, controller, emotional_state, emotional_memory):
-        """
-        Senate-aware proposal method.
-        Ensures controller and message are passed through to BaseLLMActor.
-        """
+        return 0.93
 
+    def propose(self, context, message, controller, emotional_state, emotional_memory):
         llm_proposal = super().propose(
             context=context,
             emotional_state=emotional_state,
@@ -58,10 +48,35 @@ class Synthesizer(BaseLLMActor):
             controller=controller,
         )
 
-        # Optional: actor-specific confidence logic
-        if hasattr(self, "compute_confidence"):
-            llm_proposal["confidence"] = self.compute_confidence(
-                llm_proposal.get("reasoning", [])
-            )
+        llm_proposal["confidence"] = self.compute_confidence(
+            llm_proposal.get("reasoning", [])
+        )
 
-        return llm_proposal    
+        return llm_proposal
+
+    # ---------------------------------------------------------
+    # Fusion-friendly response generation (Fusion 2.1)
+    # ---------------------------------------------------------
+    def respond(self, prompt: str, **kwargs) -> str:
+        """
+        Produce a short, single-paragraph integrative interpretation.
+        Keep it balanced and cohesive so Fusion can blend it cleanly.
+        """
+        raw = super().respond(prompt, **kwargs)
+        return self._postprocess(raw)
+
+    def _postprocess(self, text: str) -> str:
+        import re
+
+        # Remove markdown bullets and numbered lists
+        text = re.sub(r'[\*\-\•]+', ' ', text)          # bullets
+        text = re.sub(r'\n?\s*\d+\.\s+', ' ', text)     # numbered lists
+
+        # Strip common analysis boilerplate
+        text = re.sub(r"The user's message can be analyzed as follows:?", ' ', text, flags=re.IGNORECASE)
+        text = re.sub(r"That's a clear( and also)? concise proposal!? ?", ' ', text, flags=re.IGNORECASE)
+        text = re.sub(r"Title:\s*[^\.!\n]+", ' ', text, flags=re.IGNORECASE)
+
+        # Collapse whitespace and keep it to a single paragraph
+        text = re.sub(r'\s+', ' ', text).strip()
+        return text

@@ -6,6 +6,8 @@ from uuid import uuid4
 logging.getLogger().handlers.clear()
 logging.getLogger().propagate = False
 
+import sys
+sys.stdout.reconfigure(encoding='utf-8')
 
 # Generate session ID once per run
 SESSION_ID = os.getenv("CONTINUUM_SESSION_ID", f"session-{uuid4().hex[:8]}")
@@ -21,13 +23,13 @@ SESSION_LOG_PATH = os.path.join(BASE_LOG_DIR, f"{SESSION_ID}.log")
 ERROR_LOG_PATH = os.path.join(os.getcwd(), "logs", "errors.log")
 DEBUG_LOG_PATH = os.path.join(os.getcwd(), "logs", "debug.log")
 
-# Configure root logger
+# Configure root logger with UTF‑8 encoding
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] [%(message)s",
     handlers=[
-        logging.FileHandler(SESSION_LOG_PATH),
-        logging.FileHandler(DEBUG_LOG_PATH),
+        logging.FileHandler(SESSION_LOG_PATH, encoding="utf-8"),
+        logging.FileHandler(DEBUG_LOG_PATH, encoding="utf-8"),
         logging.StreamHandler()
     ]
 )
@@ -47,7 +49,8 @@ logger.addFilter(ContextFilter())
 
 def log_error(message, phase="error"):
     logger.error(message, extra={"phase": phase})
-    with open(ERROR_LOG_PATH, "a") as f:
+    # Write UTF‑8 here too
+    with open(ERROR_LOG_PATH, "a", encoding="utf-8") as f:
         f.write(f"{datetime.now()} [{SESSION_ID}] [{phase}] {message}\n")
 
 def log_debug(message, phase="debug"):

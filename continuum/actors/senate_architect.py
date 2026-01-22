@@ -1,28 +1,19 @@
 # continuum/actors/senate_architect.py
 
-from continuum.actors.architect import Architect
-from continuum.actors.base_actor import BaseActor
-from continuum.actors.synthesizer import Synthesizer
+from continuum.actors.senate_base import SenateBase
 
 
-class SenateArchitect(BaseActor):
+class SenateArchitect(SenateBase):
     """
     Phase‑4 Senate wrapper for the Architect LLM actor.
-    Delegates proposal generation to the LLM actor.
+    Delegates proposal generation to the underlying LLM actor.
     """
 
-    def __init__(self):
-        super().__init__("SenateArchitect")
-        self.llm_actor = Architect()
+    def __init__(self, llm_actor):
+        super().__init__(llm_actor, "SenateArchitect")
 
-    def propose(
-        self,
-        context,
-        message,
-        controller,
-        emotional_state,
-        emotional_memory,
-    ):
+    def propose(self, context, message, controller, emotional_state, emotional_memory):
+        # Delegate to the underlying actor
         llm_proposal = self.llm_actor.propose(
             context=context,
             message=message,
@@ -30,7 +21,6 @@ class SenateArchitect(BaseActor):
             emotional_state=emotional_state,
             emotional_memory=emotional_memory,
         )
-
 
         # Tag as Senate output
         llm_proposal["actor"] = "SenateArchitect"
