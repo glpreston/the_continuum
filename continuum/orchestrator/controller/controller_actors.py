@@ -1,6 +1,7 @@
 # continuum/orchestrator/controller_actors.py
 # Actor + Senate initialization for ContinuumController
 
+import os
 from typing import Dict, Any
 
 from continuum.actors.architect import Architect
@@ -19,6 +20,14 @@ from continuum.orchestrator.jury import Jury
 
 from continuum.core.logger import log_debug
 
+def load_prompt(name: str) -> str:
+    base = os.path.join(os.path.dirname(__file__), "..", "actors", "prompts")
+    path = os.path.abspath(os.path.join(base, name))
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return f.read()
+    except Exception as e:
+        return f"[ERROR: could not load prompt {name}: {e}]"
 
 def initialize_actors_and_senate(controller):
     """
@@ -29,16 +38,27 @@ def initialize_actors_and_senate(controller):
       - Jury
       - Actor enable/disable settings
     """
-
     # ---------------------------------------------------------
     # 1. LLM Actors
     # ---------------------------------------------------------
-    controller.actors: Dict[str, Any] = {}
+    # type: Dict[str, Any]
+
+    controller.actors = {} 
 
     for actor_name, cfg in controller.actors_config.items():
         model_name = cfg["default_model"]
         fallback_model = cfg["fallback_model"]
         personality = cfg["personality"]
+
+        # Map actor → prompt filename
+        prompt_file = {
+            "Architect": "architect_prompt.txt",
+            "Storyweaver": "storyweaver_prompt.txt",
+            "Analyst": "analyst_prompt.txt",
+            "Synthesizer": "synthesizer_prompt.txt",
+        }.get(actor_name)
+
+        system_prompt = load_prompt(prompt_file)
 
         if actor_name == "Architect":
             actor_cls = Architect
@@ -56,13 +76,14 @@ def initialize_actors_and_senate(controller):
             model_name=model_name,
             fallback_model=fallback_model,
             personality=personality,
-            system_prompt="",
+            system_prompt=system_prompt,   # ← FIXED
             temperature=0.7,
             max_tokens=2048,
             controller=controller,
         )
 
         controller.actors[actor_name] = llm_actor
+
 
     log_debug("[ACTORS] LLM actors initialized", phase="controller")
 

@@ -139,12 +139,13 @@ def apply_persona_curve(actor_name: str, scores: Dict[str, float]) -> Dict[str, 
 # =========================================================
 
 BASE_WEIGHTS = {
-    "relevance": 0.25,
-    "semantic_depth": 0.20,
+    "relevance": 0.22,
+    "semantic_depth": 0.22,
     "structure": 0.20,
-    "emotional_alignment": 0.20,
+    "emotional_alignment": 0.14,
     "memory_alignment": 0.10,
-    "novelty": 0.05,
+    "novelty": 0.06,
+    "integrative_reasoning": 0.06,
 }
 
 

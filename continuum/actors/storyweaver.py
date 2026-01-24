@@ -39,21 +39,62 @@ class Storyweaver(BaseLLMActor):
     def compute_confidence(self, steps):
         return 0.90
 
-    def propose(self, context, message, controller, emotional_state, emotional_memory):
+
+
+    def propose(
+        self,
+        context,
+        message,
+        controller,
+        model,
+        temperature,
+        max_tokens,
+        system_prompt,
+        memory,
+        emotional_state,
+        voiceprint,
+        metadata,
+        telemetry,
+    ):
+        # -----------------------------------------------------
+        # 1. Read selected model from Senate (if available)
+        # -----------------------------------------------------
+        selected_model = None
+        key = f"selected_model_{self.name}"
+
+        if hasattr(controller.context, "debug_flags"):
+            selected_model = controller.context.debug_flags.get(key)
+
+        # Fallback to actor default if selector failed
+        model_to_use = selected_model or model or self.model_name
+
+        # -----------------------------------------------------
+        # 2. Call BaseLLMActor.propose() with full Phase‑4 args
+        # -----------------------------------------------------
         llm_proposal = super().propose(
             context=context,
-            emotional_state=emotional_state,
-            emotional_memory=emotional_memory,
             message=message,
             controller=controller,
+            model_override=model_to_use,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            system_prompt=system_prompt,
+            memory=memory,
+            emotional_state=emotional_state,
+            voiceprint=voiceprint,
+            metadata=metadata,
+            telemetry=telemetry,
         )
 
+        # -----------------------------------------------------
+        # 3. Confidence scoring
+        # -----------------------------------------------------
         llm_proposal["confidence"] = self.compute_confidence(
             llm_proposal.get("reasoning", [])
         )
 
         return llm_proposal
-
+    
     # ---------------------------------------------------------
     # Fusion-friendly response generation (Fusion 2.1)
     # ---------------------------------------------------------

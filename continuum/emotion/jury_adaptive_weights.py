@@ -7,7 +7,7 @@ from continuum.emotion.state_machine import EmotionalState
 def compute_adaptive_weights(state: EmotionalState) -> Dict[str, float]:
     """
     Convert emotional state → dynamic Jury weight adjustments.
-    Rubric 3.0 version:
+    Depth‑aware Rubric 3.0 version:
       - relevance
       - semantic_depth
       - structure
@@ -19,38 +19,48 @@ def compute_adaptive_weights(state: EmotionalState) -> Dict[str, float]:
     s = state.as_dict()
 
     # ---------------------------------------------------------
-    # Base weights (Rubric 3.0)
+    # Depth‑aware base weights
     # ---------------------------------------------------------
+    # These ensure the Jury always prioritizes depth + structure,
+    # even before emotional modulation is applied.
     weights = {
         "relevance": 1.0,
-        "semantic_depth": 1.0,
-        "structure": 1.0,
-        "emotional_alignment": 1.0,
-        "memory_alignment": 1.0,
-        "novelty": 1.0,
+        "semantic_depth": 1.6,   # strong base emphasis
+        "structure": 1.3,        # moderate base emphasis
+        "emotional_alignment": 0.8,
+        "memory_alignment": 0.7,
+        "novelty": 0.6,
+        "integrative_reasoning": 1.2,  # NEW
     }
 
     # ---------------------------------------------------------
-    # Emotional influences (mapped from old → new dimensions)
+    # Emotional influences (gentle, not dominant)
     # ---------------------------------------------------------
 
-    # Structure ~ old "coherence"
-    weights["structure"] += s["tension"] * 0.4 + s["calm"] * 0.2
+    # Structure increases with tension (need for clarity) and calm (stability)
+    weights["structure"] += s["tension"] * 0.25 + s["calm"] * 0.15
 
-    # Semantic depth ~ old "reasoning_quality"
-    weights["semantic_depth"] += s["focus"] * 0.5 + s["calm"] * 0.3
+    # Semantic depth increases with focus + calm
+    weights["semantic_depth"] += s["focus"] * 0.35 + s["calm"] * 0.25
 
-    # Relevance ~ old "relevance" + fatigue bias
-    weights["relevance"] += s["fatigue"] * 0.3
+    # Relevance increases slightly with fatigue (need for grounding)
+    weights["relevance"] += s["fatigue"] * 0.15
 
-    # Emotional alignment (unchanged)
-    weights["emotional_alignment"] += s["joy"] * 0.4 + s["tension"] * 0.2
+    # Emotional alignment responds to joy + tension, but gently
+    weights["emotional_alignment"] += s["joy"] * 0.20 + s["tension"] * 0.10
 
-    # Novelty (unchanged)
-    weights["novelty"] += s["curiosity"] * 0.5 + s["joy"] * 0.2
+    # Novelty responds to curiosity + joy
+    weights["novelty"] += s["curiosity"] * 0.25 + s["joy"] * 0.10
 
-    # Memory alignment (unchanged)
-    weights["memory_alignment"] += s["calm"] * 0.2
+    # Memory alignment increases with calm (stability)
+    weights["memory_alignment"] += s["calm"] * 0.15
+
+    # Integrative reasoning increases with curiosity, calm, and focus
+    weights["integrative_reasoning"] += (
+        s["curiosity"] * 0.30
+        + s["calm"] * 0.20
+        + s["focus"] * 0.25
+    )
 
     # ---------------------------------------------------------
     # Normalize to stable range

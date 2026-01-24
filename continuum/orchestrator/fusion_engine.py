@@ -21,9 +21,18 @@ def fused_response(
     # Proposals keyed by Senate actor names
     proposals_by_actor = {p.get("actor"): p for p in ranked_proposals}
 
-    # Sort actors by descending weight
+    # Depth‑boosted weighting (Fusion‑2.1)
+    def boosted_weight(actor_name, base_weight):
+        proposal = proposals_by_actor.get(actor_name, {})
+        scores = proposal.get("metadata", {}).get("jury_scores", {})
+        depth = scores.get("semantic_depth", 0.0)
+        integrative = scores.get("integrative_reasoning", 0.0)
+
+        # Nonlinear boost: deeper + more integrative actors get more influence
+        return base_weight * (1 + 0.6 * depth + 0.5 * integrative)
+
     weighted_actors = sorted(
-        fusion_weights.items(),
+        [(name, boosted_weight(name, w)) for name, w in fusion_weights.items()],
         key=lambda x: x[1],
         reverse=True
     )
@@ -56,12 +65,16 @@ def fused_response(
             continue
 
         # Weight‑aware selection
+        # Fusion‑2.1: structure‑preserving selection
         if weight >= 0.75:
+            # Keep first 2 sentences to preserve structure
             selected = sentences[:2]
         elif weight >= 0.40:
+            # Keep the strongest opening sentence
             selected = sentences[:1]
         else:
-            selected = [sentences[0][:120]]
+            # Keep a short conceptual fragment
+            selected = [sentences[0][:160]]
 
         for s in selected:
             if not s:
@@ -75,12 +88,13 @@ def fused_response(
             s = filtered[0]
 
             # Deduplication
-            key = s.lower().strip()
-            if key in seen:
-                continue
+        # Fusion‑2.1: stronger redundancy suppression
+        key = " ".join(s.lower().split())
+        if any(key in existing.lower() or existing.lower() in key for existing in seen):
+            continue
 
-            seen.add(key)
-            distilled_points.append(s)
+        seen.add(s)
+        distilled_points.append(s)
 
     # ---------------------------------------------------------
     # 2. Fallback: if nothing survived, use top actor’s content
@@ -101,8 +115,12 @@ def fused_response(
         # ---------------------------------------------------------
         # 3. Build a unified paragraph
         # ---------------------------------------------------------
-        fused_raw = " ".join(distilled_points).strip()
-
+        # Fusion‑2.1: preserve conceptual flow
+        fused_raw = (
+            " ".join(distilled_points)
+            .replace("..", ".")
+            .strip()
+        )
     # Store raw fused actor output for debugging/inspection
     controller.last_raw_actor_output = fused_raw
 

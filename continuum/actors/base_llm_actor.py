@@ -1,9 +1,8 @@
-# continuum/actors/base_llm_actor.py
-
 import os
 from typing import Any
 
 from continuum.actors.base_actor import BaseActor
+from continuum.core.logger import log_error
 
 
 class BaseLLMActor(BaseActor):
@@ -67,53 +66,99 @@ class BaseLLMActor(BaseActor):
         emotional_memory: Any,
         **kwargs,
     ) -> str:
-        """
-        Fusion‑2.1: return persona template exactly as-is.
-        """
         return self.prompt_template
 
     # ------------------------------------------------------------------
-    # Optional postprocess hook
+    # NEW: Safe postprocess override
     # ------------------------------------------------------------------
-    def _postprocess(self, text: str) -> str:
-        return text.strip()
+    def _postprocess(self, output):
+        """
+        Ensures the LLM output is always treated as a clean string.
+        Handles:
+        - Dummy model output (string)
+        - Real LLM output (string)
+        - Unexpected dict formats
+        """
+        log_error(
+            f"[FORENSICS] _postprocess received type={type(output)} value={repr(output)}",
+            phase="senate",
+        )
+
+        # If the model returns a dict, extract the content
+        if isinstance(output, dict):
+            output = output.get("content", "")
+
+        # Ensure output is a string
+        if not isinstance(output, str):
+            output = str(output)
+
+        return output.strip()
 
     # ------------------------------------------------------------------
-    # Proposal generation (Senate stage)
+    # Proposal generation
     # ------------------------------------------------------------------
     def propose(
         self,
         context,
+        message,
+        controller,
+        model_override,
+        temperature,
+        max_tokens,
+        system_prompt,
+        memory,
         emotional_state,
-        emotional_memory,
-        message=None,
-        controller=None,
+        voiceprint,
+        metadata,
+        telemetry,
         **kwargs,
     ):
         if controller is None:
             raise ValueError("BaseLLMActor.propose() requires a controller instance.")
 
-        model_info = controller.registry.get(self.model_name)
-        if not model_info:
-            return {
-                "actor": self.name,
-                "content": f"[ERROR] No model found: {self.model_name}",
-                "confidence": 0.0,
-                "reasoning": ["Model registry returned no match"],
-                "metadata": {"type": "llm_actor"},
-            }
+        # ---------------------------------------------------------
+        # MODEL SELECTION (Senate-driven)
+        # ---------------------------------------------------------
+        model_to_use = model_override or self.model_name
+        model_info = controller.registry.get(model_to_use)
 
+        if model_info is None:
+            # Fallback: use the first available model from the registry
+            if controller.registry.models:
+                fallback_info = next(iter(controller.registry.models.values()))
+                log_error(
+                    f"[MODEL FALLBACK] No model_info for '{model_to_use}', "
+                    f"falling back to '{fallback_info.name}'",
+                    phase="senate",
+                )
+                model_info = fallback_info
+            else:
+                raise RuntimeError(
+                    f"No models available in registry; tried '{model_to_use}'."
+                )
+
+        print("MODEL INFO:", model_info)
+
+        # DEBUG: sanity check
+        log_error(
+            f"[DEBUG] In {self.name}.propose(): controller={type(controller)}, "
+            f"controller.registry={repr(getattr(controller, 'registry', None))} "
+            f"type={type(getattr(controller, 'registry', None))}",
+            phase="senate",
+        )
+
+        # ---------------------------------------------------------
         # Build system-style prompt for Ollama
+        # ---------------------------------------------------------
         persona_prompt = self.build_prompt(
             context=context,
             emotional_state=emotional_state,
-            emotional_memory=emotional_memory,
+            emotional_memory=memory,
             message=message,
             controller=controller,
             **kwargs,
         )
 
-        # Combine persona + user message
         combined_prompt = (
             persona_prompt
             + "\n\nUser message:\n"
@@ -121,33 +166,21 @@ class BaseLLMActor(BaseActor):
             + "\n\nAssistant:"
         )
 
-        # Debug: show full prompt sent to Ollama
-        if getattr(controller.context, "debug_flags", {}).get("show_prompts"):
-            print("\n================= DEBUG: FULL PROMPT =================")
-            print(combined_prompt)
-            print("=====================================================\n")
-
+        # ---------------------------------------------------------
         # Generate LLM output
+        # ---------------------------------------------------------
         llm_output = model_info.node.generate(
             prompt=combined_prompt,
-            temperature=self.temperature,
-            max_tokens=self.max_tokens,
+            temperature=temperature or self.temperature,
+            max_tokens=max_tokens or self.max_tokens,
         )
 
-        # Debug: raw LLM output BEFORE postprocessing
-        if getattr(controller.context, "debug_flags", {}).get("show_prompts"):
-            print(f"\n=== DEBUG LLM RAW OUTPUT ({self.name}) ===")
-            print(repr(llm_output))
-            print("==========================================\n")
+        log_error(
+            f"[FORENSICS] llm_output type={type(llm_output)} value={repr(llm_output)}",
+            phase="senate",
+        )
 
-        # Postprocess
         clean = self._postprocess(llm_output)
-
-        # Debug: cleaned proposal
-        if getattr(controller.context, "debug_flags", {}).get("show_prompts"):
-            print(f"\n=== DEBUG RAW PROPOSAL ({self.name}) ===")
-            print(clean)
-            print("=======================================\n")
 
         return {
             "actor": self.name,
@@ -163,19 +196,16 @@ class BaseLLMActor(BaseActor):
         }
 
     # ------------------------------------------------------------------
-    # Fusion‑2.1 final response (raw prompt → model → text)
+    # Fusion‑2.1 final response
     # ------------------------------------------------------------------
     def respond(self, prompt: str, **kwargs) -> str:
 
-        # Debug: show Fusion prompt
-        if getattr(self.controller.context, "debug_flags", {}).get("show_prompts"):
-            print("\n================= DEBUG: FUSION PROMPT =================")
-            print(prompt)
-            print("========================================================\n")
+        # MODEL SELECTION (Senate-driven)
+        model_to_use = kwargs.get("model_override") or self.model_name
 
-        model_info = self.registry.get(self.model_name)
+        model_info = self.registry.get(model_to_use)
         if not model_info:
-            return f"[ERROR] No model found: {self.model_name}"
+            return f"[ERROR] No model found: {model_to_use}"
 
         output = model_info.node.generate(
             prompt=prompt,

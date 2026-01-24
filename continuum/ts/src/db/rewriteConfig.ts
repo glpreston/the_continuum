@@ -1,10 +1,22 @@
 // db/rewriteConfig.ts
 
 import { db } from "./client";
+import { toPlain } from "./utils";
 
-export async function getRewriteConfig() {
-  const [rows] = await db.execute(`SELECT * FROM rewrite_config LIMIT 1`);
-  return rows.length ? rows[0] : null;
+export interface RewriteConfig {
+  id: number;
+  pinned_model: string | null;
+  forbidden_models: string | null;
+  drift_guard_enabled: boolean;
+  max_rewrite_depth: number;
+}
+
+export async function getRewriteConfig(): Promise<RewriteConfig | null> {
+  const [rows] = await db.execute<any[]>(
+    `SELECT * FROM rewrite_config LIMIT 1`
+  );
+
+  return rows.length > 0 ? toPlain<RewriteConfig>(rows[0]) : null;
 }
 
 export async function updateRewriteConfig(config: {
@@ -14,6 +26,7 @@ export async function updateRewriteConfig(config: {
   max_rewrite_depth?: number;
 }) {
   const existing = await getRewriteConfig();
+
   if (!existing) {
     await db.execute(
       `

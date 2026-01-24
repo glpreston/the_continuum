@@ -39,17 +39,28 @@ def process_message(controller, message: str) -> str:
     )
 
     # ---------------------------------------------------------
-    # 2. Senate → Jury deliberation
+    # 2. Senate → Jury deliberation (now selector‑aware)
     # ---------------------------------------------------------
     log_error("🔥 CALLING DELIBERATION ENGINE 🔥", phase="delib")
 
+    """
     ranked, final_proposal = controller.deliberation_engine.run(
         controller=controller,
         context=controller.context,
         message=message,
         emotional_state=controller.emotional_state,
         emotional_memory=controller.emotional_memory,
+        select_model=controller.select_model,   # ⭐ Inject selector here
+    )"""
+
+    ranked, final_proposal = controller.deliberation_engine.run(
+        controller,
+        controller.context,
+        message,
+        controller.emotional_state,
+        controller.emotional_memory,
     )
+
 
     log_debug(f"[PROCESS] Final proposal from Jury: {final_proposal}", phase="delib")
 
@@ -74,6 +85,7 @@ def process_message(controller, message: str) -> str:
 
     log_debug(f"[PROCESS] Final text before rewrite: {final_text}", phase="fusion")
 
+    print("FINAL PROPOSAL RAW:", final_proposal)
     controller.last_final_proposal = final_proposal
 
     # ---------------------------------------------------------
@@ -103,16 +115,5 @@ def process_message(controller, message: str) -> str:
         "emotion": controller.emotional_state,
         "proposals": ranked,
     })
-
-    """
-    controller.turn_logger.append(
-        user_message=message,
-        assistant_output=rewritten,
-        raw_emotion=raw_state,
-        final_proposal=final_proposal,
-        dominant_emotion=dominant_emotion,
-        intensity=intensity,
-    )
-    """
 
     return rewritten

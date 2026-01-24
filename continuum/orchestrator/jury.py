@@ -1,5 +1,4 @@
 # continuum/orchestrator/jury.py
-
 from typing import List, Dict, Any, Optional
 
 from continuum.orchestrator.jury_rubric import score_proposal
@@ -90,7 +89,8 @@ class Jury:
             f"- Structure: {b.get('structure', 0.0):.2f}\n"
             f"- Emotional Alignment: {b.get('emotional_alignment', 0.0):.2f}\n"
             f"- Memory Alignment: {b.get('memory_alignment', 0.0):.2f}\n"
-            f"- Novelty: {b.get('novelty', 0.0):.2f}\n\n"
+            f"- Novelty: {b.get('novelty', 0.0):.2f}\n"
+            f"- Integrative Reasoning: {b.get('integrative_reasoning', 0.0):.2f}\n\n"
             f"Weighted total score: **{b.get('total', 0.0):.3f}**."
         )
 
@@ -145,13 +145,15 @@ class Jury:
         if emotional_state is not None:
             adaptive_weights = compute_adaptive_weights(emotional_state)
         else:
+            # Depth-aware default weights (no emotional_state provided)
             adaptive_weights = {
                 "relevance": 1.0,
-                "semantic_depth": 1.0,
-                "structure": 1.0,
-                "emotional_alignment": 1.0,
-                "memory_alignment": 1.0,
-                "novelty": 1.0,
+                "semantic_depth": 1.8,
+                "structure": 1.3,
+                "emotional_alignment": 0.8,
+                "memory_alignment": 0.7,
+                "novelty": 0.6,
+                "integrative_reasoning": 1.2,   # NEW
             }
 
         # 1. Score proposals
@@ -162,24 +164,19 @@ class Jury:
             memory_summary=memory_summary,
         )
 
-        # Apply adaptive weights to totals (Rubric 3.0, defensive)
+        # Normalize adaptive weights so totals stay in a sane range
+        norm = sum(adaptive_weights.values()) or 1.0
+        normalized_weights = {
+            k: v / norm for k, v in adaptive_weights.items()
+        }
+
+        # Apply normalized adaptive weights (includes integrative reasoning)
         for actor, dims in scored.items():
-            relevance = dims.get("relevance", 0.0)
-            semantic_depth = dims.get("semantic_depth", 0.0)
-            structure = dims.get("structure", 0.0)
-            emotional_alignment = dims.get("emotional_alignment", 0.0)
-            memory_alignment = dims.get("memory_alignment", 0.0)
-            novelty = dims.get("novelty", 0.0)
-
-            dims["total"] = (
-                relevance * adaptive_weights.get("relevance", 1.0)
-                + semantic_depth * adaptive_weights.get("semantic_depth", 1.0)
-                + structure * adaptive_weights.get("structure", 1.0)
-                + emotional_alignment * adaptive_weights.get("emotional_alignment", 1.0)
-                + memory_alignment * adaptive_weights.get("memory_alignment", 1.0)
-                + novelty * adaptive_weights.get("novelty", 1.0)
+            dims["total"] = sum(
+                dims.get(k, 0.0) * normalized_weights.get(k, 0.0)
+                for k in normalized_weights
             )
-
+            
         # 2. Select winner
         winner = self.select_best(scored)
         if not winner:
@@ -208,7 +205,6 @@ class Jury:
         metadata["jury_reasoning"] = explanation
         metadata["jury_scores"] = scored[winner]
         metadata["jury_all_scores"] = scored
-        # 4. Attach metadata
 
         # Remap legacy weight keys (Rubric 2.x → Rubric 3.0) if present
         if "coherence" in adaptive_weights or "reasoning_quality" in adaptive_weights or "intent_alignment" in adaptive_weights:
@@ -228,9 +224,6 @@ class Jury:
         metadata["jury_scores"] = scored[winner]
         metadata["jury_all_scores"] = scored
         metadata["jury_weights"] = remapped_weights
-
-
-
 
         if dissent:
             metadata["jury_dissent"] = dissent

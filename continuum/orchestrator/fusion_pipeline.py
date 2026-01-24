@@ -27,28 +27,59 @@ class FusionPipeline:
         self.last_final_text: Optional[str] = None
 
     # ---------------------------------------------------------
-    # APPLY SMOOTHING + EMOTIONAL MOMENTUM
+    # APPLY SMOOTHING + EMOTIONAL MOMENTUM + DEPTH BOOST
     # ---------------------------------------------------------
     def adjust(self, final_proposal: Dict) -> Dict[str, float]:
         """
         Extracts fusion weights from the final proposal and applies:
           - smoothing
+          - depth-aware boost (semantic depth from Jury)
           - emotional momentum
         Returns adjusted weights.
         """
 
-        raw_weights = final_proposal.get("metadata", {}).get("fusion_weights", {})
+        metadata = final_proposal.get("metadata", {}) or {}
+        raw_weights = metadata.get("fusion_weights", {}) or {}
         self.last_raw_weights = raw_weights
 
         log_info("Applying fusion smoothing and emotional momentum", phase="fusion")
 
         # Step 1: smoothing
-        smoothed = self.smoother.smooth(raw_weights or {})
+        smoothed = self.smoother.smooth(raw_weights)
         self.last_smoothed_weights = smoothed
+
+        # -----------------------------------------------------
+        # Step 1.5: depth-aware boost using Jury scores
+        # -----------------------------------------------------
+        jury_all_scores = metadata.get("jury_all_scores", {}) or {}
+
+        depth_boosted: Dict[str, float] = {}
+        for actor_name, weight in smoothed.items():
+            actor_scores = jury_all_scores.get(actor_name, {}) or {}
+            semantic_depth = actor_scores.get("semantic_depth", 0.0)
+            structure_score = actor_scores.get("structure", 0.0)
+
+            # Depth factor: reward deeper + better structured proposals
+            # semantic_depth is typically in [0, 1]; structure in [0, 1]
+            depth_factor = 1.0 + 0.35 * semantic_depth + 0.20 * structure_score
+
+            boosted_weight = weight * depth_factor
+            depth_boosted[actor_name] = boosted_weight
+
+        # Renormalize after boosting so weights sum to ~1
+        total_boosted = sum(depth_boosted.values()) or 1.0
+        depth_boosted = {
+            k: v / total_boosted for k, v in depth_boosted.items()
+        }
+
+        log_debug(
+            f"Fusion weights after depth boost (semantic_depth + structure): {depth_boosted}",
+            phase="fusion",
+        )
 
         # Step 2: emotional momentum
         adjusted = apply_emotional_momentum(
-            smoothed or {},
+            depth_boosted,
             self.emotional_arc_engine.get_history(),
         )
 
@@ -89,7 +120,6 @@ class FusionPipeline:
             self.last_final_text = final_text
             return final_text
 
-
         # -------------------------
         # FALLBACK: SINGLE ACTOR
         # -------------------------
@@ -98,18 +128,22 @@ class FusionPipeline:
             phase="fusion",
         )
 
+        if not ranked_proposals:
+            log_error(
+                "[FUSION FALLBACK] No ranked proposals available.",
+                phase="fusion",
+            )
+            return "The Continuum encountered an error: no proposals available."
+
+        first = ranked_proposals[0]
         log_debug(
-            f"[FUSION FALLBACK] First proposal actor: {ranked_proposals[0].get('actor')}",
+            f"[FUSION FALLBACK] First proposal actor: {first.get('actor')}",
             phase="fusion",
         )
 
-
-        # -------------------------
-        # FALLBACK: SINGLE ACTOR
-        # -------------------------
         log_info("Fusion weights empty — using single actor path", phase="fusion")
 
-        final_proposal = ranked_proposals[0]
+        final_proposal = first
         actor_name = final_proposal.get("actor")
         llm_name = controller.senate_to_llm_map.get(actor_name, actor_name)
         actor = controller.actors.get(llm_name)
@@ -118,14 +152,6 @@ class FusionPipeline:
             f"[FUSION FALLBACK] Using actor '{llm_name}' for fallback generation.",
             phase="fusion",
         )
-
-
-        log_debug(
-            f"[FUSION FALLBACK] Actor returned text: {final_text}",
-            phase="fusion",
-        )
-
-
 
         if not actor:
             log_error(
@@ -141,6 +167,10 @@ class FusionPipeline:
             emotional_state=controller.emotional_state,
         )
 
+        log_debug(
+            f"[FUSION FALLBACK] Actor returned text: {final_text}",
+            phase="fusion",
+        )
+
         self.last_final_text = final_text
         return final_text
-    

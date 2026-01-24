@@ -4,8 +4,8 @@
 import mysql from "mysql2/promise";
 
 export const db = mysql.createPool({
-  host: "localhost",
-  user: "root",
-  password: "",
-  database: "continuum"
+  host: "192.168.50.114",
+  user: "hal",
+  password: "Hal@2025!",
+  database: "aira_config"
 });

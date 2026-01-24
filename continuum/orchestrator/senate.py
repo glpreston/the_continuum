@@ -1,5 +1,3 @@
-# continuum/orchestrator/senate.py
-
 from typing import List, Dict, Any
 from sklearn.feature_extraction.text import TfidfVectorizer
 from continuum.persona.topics import detect_topic, TOPIC_ACTOR_WEIGHTS
@@ -8,8 +6,8 @@ from continuum.core.logger import log_info, log_debug, log_error
 
 class Senate:
     """
-    The Senate gathers proposals from all actors, filters out empty ones,
-    ranks them by confidence, and forwards the strongest proposals to the Jury.
+    Phase‑4 Senate: gathers proposals from all actors, filters, ranks,
+    computes similarity, and returns ranked proposals.
     """
 
     def __init__(self, actors: List[Any]):
@@ -18,9 +16,24 @@ class Senate:
         log_debug(f"[SENATE] Initialized with actors: {[a.name for a in actors]}", phase="senate")
 
     # ---------------------------------------------------------
-    # COLLECT PROPOSALS
+    # COLLECT PROPOSALS (Phase‑4)
     # ---------------------------------------------------------
-    def gather_proposals(self, context, message: str, controller, emotional_state, emotional_memory) -> List[Dict[str, Any]]:
+    def gather_proposals(
+        self,
+        context,
+        message: str,
+        controller,
+        model,
+        temperature,
+        max_tokens,
+        system_prompt,
+        memory,
+        emotional_state,
+        voiceprint,
+        metadata,
+        telemetry,
+    ) -> List[Dict[str, Any]]:
+
         proposals: List[Dict[str, Any]] = []
 
         log_error("🔥🔥🔥 ENTERED gather_proposals() 🔥🔥🔥", phase="senate")
@@ -28,33 +41,96 @@ class Senate:
 
         for actor in self.actors:
 
-            # Skip disabled actors (J7)
+            # Skip disabled actors
             if not controller.actor_settings.get(actor.name, {}).get("enabled", True):
                 log_debug(f"[SENATE] Actor {actor.name} is disabled — skipping", phase="senate")
                 continue
 
             try:
-                # 1) Generate the proposal text + metadata
+                # -------------------------------------------------
+                # 0) Adaptive model selection
+                # -------------------------------------------------
+                selected_model = None
+
+                if hasattr(controller, "select_model") and callable(controller.select_model):
+                    try:
+                        actor_name = actor.name
+                        default_model = getattr(actor, "model_name", None)
+
+                        log_debug(
+                            f"[SENATE] Calling selector for actor={actor_name}, "
+                            f"role='proposal', default_model={default_model}",
+                            phase="senate",
+                        )
+
+                        selected_model = controller.select_model(
+                            actor_name,
+                            "proposal",
+                            default_model,
+                        )
+
+                        log_debug(
+                            f"[SENATE] Selector chose model '{selected_model}' for actor {actor_name}",
+                            phase="senate",
+                        )
+
+                        controller.context.debug_flags[f"selected_model_{actor_name}"] = selected_model
+
+                    except Exception as sel_err:
+                        log_error(
+                            f"🔥🔥🔥 ERROR in selector for actor {actor.name}: {sel_err} 🔥🔥🔥",
+                            phase="senate",
+                        )
+                        selected_model = None
+
+                # -------------------------------------------------
+                # 1) Generate proposal (Phase‑4 signature)
+                # -------------------------------------------------
                 log_debug(f"[SENATE] Calling propose() on {actor.name}", phase="senate")
 
                 proposal = actor.propose(
                     context=context,
                     message=message,
                     controller=controller,
+                    model=selected_model or model,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    system_prompt=system_prompt,
+                    memory=memory,
                     emotional_state=emotional_state,
-                    emotional_memory=emotional_memory,
+                    voiceprint=voiceprint,
+                    metadata=metadata,
+                    telemetry=telemetry,
                 )
 
                 log_debug(f"[SENATE] Raw proposal from {actor.name}: {proposal}", phase="senate")
+                log_error(f"[FORENSICS] Senate received proposal type={type(proposal)} value={repr(proposal)}", phase="senate")
 
-                # 2) Apply actor weight (J7)
+                # Ensure metadata exists
+                metadata_obj = proposal.get("metadata") or {}
+                proposal["metadata"] = metadata_obj
+
+                # Attach selected model
+                if selected_model is not None:
+                    metadata_obj["selected_model"] = selected_model
+                    metadata_obj.setdefault("model_selection", {})["source"] = "ts_selector"
+                    metadata_obj["model_selection"]["actor"] = actor.name
+                    metadata_obj["model_selection"]["role"] = "proposal"
+
+                # -------------------------------------------------
+                # 2) Apply actor weight
+                # -------------------------------------------------
                 weight = controller.actor_settings.get(actor.name, {}).get("weight", 1.0)
                 proposal["confidence"] = proposal.get("confidence", 0) * weight
 
-                # 3) J9 Layer 3: reasoning summary
+                # -------------------------------------------------
+                # 3) Reasoning summary
+                # -------------------------------------------------
                 proposal["summary"] = actor.summarize_reasoning(proposal)
 
-                # 4) Optional: attach audio if actor voice mode is enabled
+                # -------------------------------------------------
+                # 4) Optional audio
+                # -------------------------------------------------
                 if getattr(controller, "actor_voice_mode", False):
                     if hasattr(actor, "speak_proposal"):
                         proposal_audio = actor.speak_proposal(proposal["content"])
@@ -98,7 +174,7 @@ class Senate:
         return ranked
 
     # ---------------------------------------------------------
-    # J11: SIMILARITY MATRIX
+    # SIMILARITY MATRIX
     # ---------------------------------------------------------
     def compute_similarity_matrix(self, proposals):
         actors = [p.get("actor", "unknown") for p in proposals]
@@ -121,9 +197,24 @@ class Senate:
         }
 
     # ---------------------------------------------------------
-    # MAIN ENTRYPOINT
+    # MAIN ENTRYPOINT (Phase‑4)
     # ---------------------------------------------------------
-    def deliberate(self, context, message: str, controller, emotional_state, emotional_memory) -> List[Dict[str, Any]]:
+    def deliberate(
+        self,
+        context,
+        message: str,
+        controller,
+        model,
+        temperature,
+        max_tokens,
+        system_prompt,
+        memory,
+        emotional_state,
+        voiceprint,
+        metadata,
+        telemetry,
+    ) -> List[Dict[str, Any]]:
+
         log_error("🔥🔥🔥 ENTERED Senate.deliberate() 🔥🔥🔥", phase="senate")
         log_info("[SENATE] Starting Senate.deliberate()", phase="senate")
 
@@ -132,11 +223,17 @@ class Senate:
             context=context,
             message=message,
             controller=controller,
+            model=model,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            system_prompt=system_prompt,
+            memory=memory,
             emotional_state=emotional_state,
-            emotional_memory=emotional_memory,
+            voiceprint=voiceprint,
+            metadata=metadata,
+            telemetry=telemetry,
         )
 
-        log_debug(f"[SENATE] Raw proposals stored in debug_flags", phase="senate")
         controller.context.debug_flags["raw_proposals"] = proposals
 
         # 2. Filter proposals

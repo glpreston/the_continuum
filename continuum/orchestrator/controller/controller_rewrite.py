@@ -37,13 +37,27 @@ def meta_rewrite_llm(controller, core_text: str, emotional_state: dict) -> str:
             "Rewrite:"
         )
 
-        response = model.generate(prompt=prompt, max_tokens=300)
+        # ---------------------------------------------------------
+        # FIX: Accumulate streamed output instead of taking 1 chunk
+        # ---------------------------------------------------------
+        raw = model.generate(prompt=prompt, max_tokens=300)
 
-        if not response:
-            log_error("[META-REWRITE] Empty response from model, falling back", phase="meta")
-            return core_text
-
-        rewritten = response.strip()
+        # If the model streams (generator, list of chunks, etc.)
+        if hasattr(raw, "__iter__") and not isinstance(raw, str):
+            text = ""
+            for chunk in raw:
+                # Ollama-style: {"response": "..."}
+                if isinstance(chunk, dict) and "response" in chunk:
+                    text += chunk["response"]
+                # LM Studio / OpenAI-style: {"choices":[{"text": "..."}]}
+                elif isinstance(chunk, dict) and "choices" in chunk:
+                    text += chunk["choices"][0].get("text", "")
+                else:
+                    text += str(chunk)
+            rewritten = text.strip()
+        else:
+            # Non-streaming clients return a full string
+            rewritten = raw.strip()
 
         # ---------------------------------------------------------
         # Guardrail: prevent useless or generic assistant replies
