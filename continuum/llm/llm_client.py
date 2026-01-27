@@ -1,6 +1,9 @@
 # continuum/llm/llm_client.py
 
 import requests
+import time
+from continuum.monitoring.model_stats import log_model_call
+
 
 class LLMClient:
     """
@@ -26,30 +29,53 @@ class LLMClient:
             },
         }
 
-        # Enable streaming
-        response = requests.post(self.endpoint, json=payload, stream=True)
+        # -----------------------------
+        # Step 4: Start latency timer
+        # -----------------------------
+        start = time.time()
 
-        if response.status_code != 200:
-            return f"[ERROR] Ollama returned {response.status_code}: {response.text}"
+        try:
+            # Enable streaming
+            response = requests.post(self.endpoint, json=payload, stream=True)
 
-        full_text = ""
+            if response.status_code != 200:
+                # Log failure
+                latency_ms = int((time.time() - start) * 1000)
+                log_model_call(model_used, False, latency_ms)
+                return f"[ERROR] Ollama returned {response.status_code}: {response.text}"
 
-        # Ollama streams NDJSON — one JSON object per line
-        for line in response.iter_lines():
-            if not line:
-                continue
+            full_text = ""
 
-            try:
-                obj = json.loads(line.decode("utf-8"))
-            except Exception:
-                continue
+            # Ollama streams NDJSON — one JSON object per line
+            for line in response.iter_lines():
+                if not line:
+                    continue
 
-            # Accumulate tokens
-            if "response" in obj:
-                full_text += obj["response"]
+                try:
+                    obj = json.loads(line.decode("utf-8"))
+                except Exception:
+                    continue
 
-            # Stop when Ollama signals completion
-            if obj.get("done"):
-                break
+                # Accumulate tokens
+                if "response" in obj:
+                    full_text += obj["response"]
 
-        return full_text
+                # Stop when Ollama signals completion
+                if obj.get("done"):
+                    break
+
+            # -----------------------------
+            # Step 4: Log success
+            # -----------------------------
+            latency_ms = int((time.time() - start) * 1000)
+            log_model_call(model_used, True, latency_ms)
+
+            return full_text
+
+        except Exception:
+            # -----------------------------
+            # Step 4: Log failure
+            # -----------------------------
+            latency_ms = int((time.time() - start) * 1000)
+            log_model_call(model_used, False, latency_ms)
+            raise

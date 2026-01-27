@@ -25,6 +25,7 @@ transformers_cache/
 huggingface/
 hf_cache/
 
+
 # Node
 node_modules/
 
@@ -47,6 +48,8 @@ desktop.ini
 # Local secrets
 secrets/
 
+# dataabase connections
+sqlalchemy_connection.py
 
 [user]
     name = glpreston

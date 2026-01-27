@@ -1,10 +1,15 @@
+
 # continuum/core/context.py
+
 """
 Conversation context for The Continuum.
 Tracks messages, memory snapshots, and user profile data.
 """
 
 from __future__ import annotations
+import inspect
+import traceback
+
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
@@ -31,9 +36,30 @@ class ContinuumContext:
     def add_user_message(self, content: str) -> None:
         self.add("user", content)
 
+    #def add_assistant_message(self, content: str) -> None:
+        #self.add("assistant", content)
+        #print("ADD_ASSISTANT_MESSAGE CALLED:", content[:50])
+
     def add_assistant_message(self, content: str) -> None:
         self.add("assistant", content)
-        print("ADD_ASSISTANT_MESSAGE CALLED:", content[:50])
+
+        print("\n================ ASSISTANT MESSAGE DEBUG ================")
+        print("CONTENT PREVIEW:", repr(content[:200]))
+        print("TYPE:", type(content))
+
+        # Who called this function?
+        stack = traceback.extract_stack(limit=5)
+        print("CALL STACK:")
+        for frame in stack:
+            print(f"  - {frame.filename}:{frame.lineno} in {frame.name}")
+
+        # Which module invoked it?
+        caller = inspect.stack()[1]
+        print("CALLER MODULE:", caller.frame.f_globals.get("__name__"))
+
+        print("=========================================================\n")
+
+
 
     def last_user_message(self) -> Optional[Message]:
         for msg in reversed(self.messages):

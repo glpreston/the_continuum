@@ -246,7 +246,7 @@ class MetaPersona:
 
         # Strength handling: subtle/moderate/strong all end as one paragraph,
         # but stronger levels are more willing to drop extra sentences.
-        if strength == "subtle":
+        """if strength == "subtle":
             # Keep most of the cleaned content
             core = cleaned
         elif strength == "moderate":
@@ -270,7 +270,9 @@ class MetaPersona:
                 if len(core) >= 3:
                     break
             if not core:
-                core = cleaned[:3]
+                core = cleaned[:3] """
+        
+        core = cleaned
 
         return " ".join(core).strip()
 

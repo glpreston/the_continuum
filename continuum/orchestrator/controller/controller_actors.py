@@ -1,24 +1,17 @@
-# continuum/orchestrator/controller_actors.py
-# Actor + Senate initialization for ContinuumController
+# continuum/orchestrator/controller/controller_actors.py
 
 import os
-from typing import Dict, Any
+from continuum.core.logger import log_debug
 
 from continuum.actors.architect import Architect
 from continuum.actors.storyweaver import Storyweaver
 from continuum.actors.analyst import Analyst
 from continuum.actors.synthesizer import Synthesizer
 
-from continuum.actors.senate_architect import SenateArchitect
-from continuum.actors.senate_storyweaver import SenateStoryweaver
-from continuum.actors.senate_analyst import SenateAnalyst
-from continuum.actors.senate_synthesizer import SenateSynthesizer
-from continuum.orchestrator.deliberation_engine import DeliberationEngine
-
 from continuum.orchestrator.senate import Senate
 from continuum.orchestrator.jury import Jury
+from continuum.orchestrator.deliberation_engine import DeliberationEngine
 
-from continuum.core.logger import log_debug
 
 def load_prompt(name: str) -> str:
     base = os.path.join(os.path.dirname(__file__), "..", "actors", "prompts")
@@ -29,106 +22,75 @@ def load_prompt(name: str) -> str:
     except Exception as e:
         return f"[ERROR: could not load prompt {name}: {e}]"
 
+
 def initialize_actors_and_senate(controller):
     """
-    Initializes:
-      - LLM actors
-      - Senate wrappers
-      - Senate
-      - Jury
-      - Actor enable/disable settings
+    Initializes actors using DB-backed registry.actor_profiles.
+    Replaces the old config-based actor loading system.
     """
+
+    controller.actors = {}
+    registry = controller.registry
+
+    # Map DB actor names → prompt files + Python classes
+    ACTOR_MAP = {
+        "Architect": ("architect_prompt.txt", Architect),
+        "Storyweaver": ("storyweaver_prompt.txt", Storyweaver),
+        "Analyst": ("analyst_prompt.txt", Analyst),
+        "Synthesizer": ("synthesizer_prompt.txt", Synthesizer),
+    }
+
     # ---------------------------------------------------------
-    # 1. LLM Actors
+    # Load actors from DB
     # ---------------------------------------------------------
-    # type: Dict[str, Any]
+    for actor_name, profile in registry.actor_profiles.items():
 
-    controller.actors = {} 
-
-    for actor_name, cfg in controller.actors_config.items():
-        model_name = cfg["default_model"]
-        fallback_model = cfg["fallback_model"]
-        personality = cfg["personality"]
-
-        # Map actor → prompt filename
-        prompt_file = {
-            "Architect": "architect_prompt.txt",
-            "Storyweaver": "storyweaver_prompt.txt",
-            "Analyst": "analyst_prompt.txt",
-            "Synthesizer": "synthesizer_prompt.txt",
-        }.get(actor_name)
-
-        system_prompt = load_prompt(prompt_file)
-
-        if actor_name == "Architect":
-            actor_cls = Architect
-        elif actor_name == "Storyweaver":
-            actor_cls = Storyweaver
-        elif actor_name == "Analyst":
-            actor_cls = Analyst
-        elif actor_name == "Synthesizer":
-            actor_cls = Synthesizer
-        else:
+        if actor_name not in ACTOR_MAP:
             raise ValueError(f"Unknown actor in DB: {actor_name}")
 
-        llm_actor = actor_cls(
+        prompt_file, actor_cls = ACTOR_MAP[actor_name]
+        system_prompt = load_prompt(prompt_file)
+
+        actor = actor_cls(
             name=actor_name,
-            model_name=model_name,
-            fallback_model=fallback_model,
-            personality=personality,
-            system_prompt=system_prompt,   # ← FIXED
-            temperature=0.7,
-            max_tokens=2048,
+            model_name=profile.model_name,
+            fallback_model=profile.fallback_model,
+            personality=profile.personality,
+            system_prompt=system_prompt,
+            temperature=profile.temperature_default,
+            max_tokens=profile.context_window,
             controller=controller,
         )
 
-        controller.actors[actor_name] = llm_actor
+        controller.actors[actor_name] = actor
 
-
-    log_debug("[ACTORS] LLM actors initialized", phase="controller")
-
-    # ---------------------------------------------------------
-    # 2. Senate Wrappers
-    # ---------------------------------------------------------
-    controller.senate_actors = {
-        "Architect": SenateArchitect(controller.actors["Architect"]),
-        "Storyweaver": SenateStoryweaver(controller.actors["Storyweaver"]),
-        "Analyst": SenateAnalyst(controller.actors["Analyst"]),
-        "Synthesizer": SenateSynthesizer(controller.actors["Synthesizer"]),
-    }
+        log_debug(f"[ACTORS] Loaded actor '{actor_name}'", phase="actors")
 
     # ---------------------------------------------------------
-    # 3. Senate
+    # Senate
     # ---------------------------------------------------------
     controller.senate = Senate([
-        controller.senate_actors["Architect"],
-        controller.senate_actors["Storyweaver"],
-        controller.senate_actors["Analyst"],
-        controller.senate_actors["Synthesizer"],
+        controller.actors["Architect"],
+        controller.actors["Storyweaver"],
+        controller.actors["Analyst"],
+        controller.actors["Synthesizer"],
     ])
 
-    controller.senate_to_llm_map = {
-        "SenateArchitect": "Architect",
-        "SenateStoryweaver": "Storyweaver",
-        "SenateAnalyst": "Analyst",
-        "SenateSynthesizer": "Synthesizer",
-    }
-
     # ---------------------------------------------------------
-    # 4. Jury
+    # Jury
     # ---------------------------------------------------------
     controller.jury = Jury()
 
     # ---------------------------------------------------------
-    # 4.5 Deliberation Engine
+    # Deliberation Engine
     # ---------------------------------------------------------
     controller.deliberation_engine = DeliberationEngine(
         senate=controller.senate,
         jury=controller.jury,
-    )   
+    )
 
     # ---------------------------------------------------------
-    # 5. Actor enable/disable settings
+    # Actor enable/disable settings
     # ---------------------------------------------------------
     controller.actor_settings = {
         "Architect": {"enabled": True},
@@ -137,4 +99,4 @@ def initialize_actors_and_senate(controller):
         "Synthesizer": {"enabled": True},
     }
 
-    log_debug("[ACTORS] Senate + Jury initialized", phase="controller")
+    log_debug("[ACTORS] Actor system initialization complete", phase="actors")

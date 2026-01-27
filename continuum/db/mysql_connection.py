@@ -1,3 +1,5 @@
+
+# continuum/db/mysql_connection.py
 import mysql.connector
 from mysql.connector import pooling
 import json
@@ -62,6 +64,44 @@ class MySQLConfigDB:
         conn.commit()
         cursor.close()
         conn.close()
+
+    def get_nodes(self):
+        """
+        Returns all nodes from the nodes table.
+        Expected schema:
+            id
+            hostname
+            endpoint
+            models_json
+            status
+            last_heartbeat
+        """
+        query = """
+            SELECT id, hostname, endpoint, models_json, status, last_heartbeat
+            FROM nodes
+        """
+
+        conn = self.get_conn()
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute(query)
+        rows = cursor.fetchall()
+        cursor.close()
+        conn.close()
+
+        # Normalize into Python dicts
+        result = []
+        for row in rows:
+            result.append({
+                "id": row["id"],
+                "name": row["hostname"],
+                "base_url": row["endpoint"],
+                "models": row["models_json"],   # JSON array already parsed by MySQL driver
+                "status": row["status"],
+                "last_heartbeat": row["last_heartbeat"],
+            })
+
+        return result
+
 
     # -----------------------------
     # Domain-specific loaders

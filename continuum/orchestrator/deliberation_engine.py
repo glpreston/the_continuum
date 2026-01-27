@@ -45,14 +45,8 @@ class DeliberationEngine:
         log_info("[DELIB] Starting Senate → Jury pipeline", phase="delib")
 
         # ---------------------------------------------------------
-        # 1. Model selection (Phase‑4)
+        # 1. No model selection here — actors handle it internally
         # ---------------------------------------------------------
-        model = controller.model_selector.select_model(
-            message=message,
-            emotional_state=emotional_state,
-            context=context,
-        )
-
         temperature = controller.temperature
         max_tokens = controller.max_tokens
         system_prompt = controller.system_prompt
@@ -70,7 +64,6 @@ class DeliberationEngine:
             context=context,
             message=message,
             controller=controller,
-            model=model,
             temperature=temperature,
             max_tokens=max_tokens,
             system_prompt=system_prompt,

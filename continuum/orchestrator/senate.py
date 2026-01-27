@@ -23,7 +23,6 @@ class Senate:
         context,
         message: str,
         controller,
-        model,
         temperature,
         max_tokens,
         system_prompt,
@@ -48,43 +47,7 @@ class Senate:
 
             try:
                 # -------------------------------------------------
-                # 0) Adaptive model selection
-                # -------------------------------------------------
-                selected_model = None
-
-                if hasattr(controller, "select_model") and callable(controller.select_model):
-                    try:
-                        actor_name = actor.name
-                        default_model = getattr(actor, "model_name", None)
-
-                        log_debug(
-                            f"[SENATE] Calling selector for actor={actor_name}, "
-                            f"role='proposal', default_model={default_model}",
-                            phase="senate",
-                        )
-
-                        selected_model = controller.select_model(
-                            actor_name,
-                            "proposal",
-                            default_model,
-                        )
-
-                        log_debug(
-                            f"[SENATE] Selector chose model '{selected_model}' for actor {actor_name}",
-                            phase="senate",
-                        )
-
-                        controller.context.debug_flags[f"selected_model_{actor_name}"] = selected_model
-
-                    except Exception as sel_err:
-                        log_error(
-                            f"🔥🔥🔥 ERROR in selector for actor {actor.name}: {sel_err} 🔥🔥🔥",
-                            phase="senate",
-                        )
-                        selected_model = None
-
-                # -------------------------------------------------
-                # 1) Generate proposal (Phase‑4 signature)
+                # 1) Generate proposal (Phase‑4: actor selects model internally)
                 # -------------------------------------------------
                 log_debug(f"[SENATE] Calling propose() on {actor.name}", phase="senate")
 
@@ -92,7 +55,6 @@ class Senate:
                     context=context,
                     message=message,
                     controller=controller,
-                    model=selected_model or model,
                     temperature=temperature,
                     max_tokens=max_tokens,
                     system_prompt=system_prompt,
@@ -109,13 +71,6 @@ class Senate:
                 # Ensure metadata exists
                 metadata_obj = proposal.get("metadata") or {}
                 proposal["metadata"] = metadata_obj
-
-                # Attach selected model
-                if selected_model is not None:
-                    metadata_obj["selected_model"] = selected_model
-                    metadata_obj.setdefault("model_selection", {})["source"] = "ts_selector"
-                    metadata_obj["model_selection"]["actor"] = actor.name
-                    metadata_obj["model_selection"]["role"] = "proposal"
 
                 # -------------------------------------------------
                 # 2) Apply actor weight
@@ -204,7 +159,6 @@ class Senate:
         context,
         message: str,
         controller,
-        model,
         temperature,
         max_tokens,
         system_prompt,
@@ -218,12 +172,13 @@ class Senate:
         log_error("🔥🔥🔥 ENTERED Senate.deliberate() 🔥🔥🔥", phase="senate")
         log_info("[SENATE] Starting Senate.deliberate()", phase="senate")
 
-        # 1. Gather proposals
+        # ---------------------------------------------------------
+        # 1. Gather proposals (Phase‑4: actors choose their own model)
+        # ---------------------------------------------------------
         proposals = self.gather_proposals(
             context=context,
             message=message,
             controller=controller,
-            model=model,
             temperature=temperature,
             max_tokens=max_tokens,
             system_prompt=system_prompt,
@@ -236,13 +191,17 @@ class Senate:
 
         controller.context.debug_flags["raw_proposals"] = proposals
 
+        # ---------------------------------------------------------
         # 2. Filter proposals
+        # ---------------------------------------------------------
         filtered = self.filter_proposals(proposals)
         controller.context.debug_flags["filtered_proposals"] = filtered
 
         log_error(f"🔥🔥🔥 FILTERED PROPOSALS COUNT = {len(filtered)} 🔥🔥🔥", phase="senate")
 
+        # ---------------------------------------------------------
         # 3. Topic detection + topic-aware confidence shaping
+        # ---------------------------------------------------------
         topic = detect_topic(message)
         topic_weights = TOPIC_ACTOR_WEIGHTS.get(topic, {})
 
@@ -257,10 +216,14 @@ class Senate:
         controller.context.debug_flags["topic"] = topic
         controller.context.debug_flags["topic_weights"] = topic_weights
 
+        # ---------------------------------------------------------
         # 4. Rank proposals
+        # ---------------------------------------------------------
         ranked = self.rank_proposals(filtered)
 
+        # ---------------------------------------------------------
         # 5. Similarity matrix
+        # ---------------------------------------------------------
         similarity = self.compute_similarity_matrix(ranked)
         controller.context.debug_flags["similarity_matrix"] = similarity
 

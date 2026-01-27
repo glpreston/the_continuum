@@ -86,18 +86,31 @@ def process_message(controller, message: str) -> str:
     log_debug(f"[PROCESS] Final text before rewrite: {final_text}", phase="fusion")
 
     print("FINAL PROPOSAL RAW:", final_proposal)
-    controller.last_final_proposal = final_proposal
-
+    # Store the fused output as the final proposal
+    controller.last_final_proposal = {
+        "actor": "FusionEngine",
+        "content": final_text,
+        "metadata": {
+            "source": "max_hybrid_fusion",
+            "fusion_weights": fusion_weights,
+            "jury_proposal": final_proposal,
+        },
+    }
     # ---------------------------------------------------------
     # 5. Meta‑Persona rewrite
     # ---------------------------------------------------------
     log_error("🔥 CALLING META‑PERSONA REWRITE 🔥", phase="meta")
 
-    rewritten = controller.meta_pipeline.rewrite(final_text, controller)
+    print("REWRITE FUNCTION:", controller.meta_rewrite_llm)
+    print("REWRITE FUNCTION MODULE:", controller.meta_rewrite_llm.__module__)
+
+    rewritten = controller.meta_rewrite_llm(
+        core_text=final_text,
+        emotion_label=dominant_emotion,
+    )
+
     log_debug(f"[PROCESS] Rewritten output: {rewritten}", phase="meta")
-
     controller.context.add_assistant_message(rewritten)
-
     # ---------------------------------------------------------
     # 6. Emotional arc recording
     # ---------------------------------------------------------

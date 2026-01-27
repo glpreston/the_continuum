@@ -10,11 +10,12 @@ from continuum.orchestrator.fusion_engine import fused_response
 
 class FusionPipeline:
     """
-    Encapsulates Fusion 2.0:
+    Fusion Pipeline (patched for MAX‑HYBRID Fusion)
       - smoothing
+      - depth boost
       - emotional momentum
-      - fused multi-actor response
-      - fallback single-actor path
+      - fused multi‑actor response
+      - clean fallback path
     """
 
     def __init__(self, smoother: FusionSmoother, emotional_arc_engine):
@@ -33,9 +34,8 @@ class FusionPipeline:
         """
         Extracts fusion weights from the final proposal and applies:
           - smoothing
-          - depth-aware boost (semantic depth from Jury)
+          - depth-aware boost (semantic depth + structure)
           - emotional momentum
-        Returns adjusted weights.
         """
 
         metadata = final_proposal.get("metadata", {}) or {}
@@ -48,9 +48,7 @@ class FusionPipeline:
         smoothed = self.smoother.smooth(raw_weights)
         self.last_smoothed_weights = smoothed
 
-        # -----------------------------------------------------
-        # Step 1.5: depth-aware boost using Jury scores
-        # -----------------------------------------------------
+        # Step 1.5: depth-aware boost
         jury_all_scores = metadata.get("jury_all_scores", {}) or {}
 
         depth_boosted: Dict[str, float] = {}
@@ -59,21 +57,15 @@ class FusionPipeline:
             semantic_depth = actor_scores.get("semantic_depth", 0.0)
             structure_score = actor_scores.get("structure", 0.0)
 
-            # Depth factor: reward deeper + better structured proposals
-            # semantic_depth is typically in [0, 1]; structure in [0, 1]
             depth_factor = 1.0 + 0.35 * semantic_depth + 0.20 * structure_score
+            depth_boosted[actor_name] = weight * depth_factor
 
-            boosted_weight = weight * depth_factor
-            depth_boosted[actor_name] = boosted_weight
-
-        # Renormalize after boosting so weights sum to ~1
+        # Renormalize
         total_boosted = sum(depth_boosted.values()) or 1.0
-        depth_boosted = {
-            k: v / total_boosted for k, v in depth_boosted.items()
-        }
+        depth_boosted = {k: v / total_boosted for k, v in depth_boosted.items()}
 
         log_debug(
-            f"Fusion weights after depth boost (semantic_depth + structure): {depth_boosted}",
+            f"Fusion weights after depth boost: {depth_boosted}",
             phase="fusion",
         )
 
@@ -101,76 +93,40 @@ class FusionPipeline:
     ) -> str:
         """
         Executes:
-          - fused multi-actor response (if weights exist)
-          - fallback single-actor path (if no weights)
+          - fused multi‑actor response (if weights exist)
+          - fallback single‑actor path (if no weights)
         """
 
-        # -------------------------
-        # FUSED RESPONSE
-        # -------------------------
-        if fusion_weights:
-            log_info("Running fused response", phase="fusion")
+        print("\n>>> ENTERED FusionPipeline.run() <<<")
 
-            final_text = fused_response(
-                fusion_weights=fusion_weights,
-                ranked_proposals=ranked_proposals,
-                controller=controller,
-            )
+        # -----------------------------------------------------
+        # 1. If no fusion weights → fallback to Jury winner
+        # -----------------------------------------------------
+        if not fusion_weights or sum(fusion_weights.values()) == 0:
+            print(">>> NO FUSION WEIGHTS — FALLBACK TO SINGLE ACTOR <<<")
 
-            self.last_final_text = final_text
-            return final_text
+            if not ranked_proposals:
+                log_error("No ranked proposals available.", phase="fusion")
+                return "The Continuum encountered an error: no proposals available."
 
-        # -------------------------
-        # FALLBACK: SINGLE ACTOR
-        # -------------------------
-        log_debug(
-            f"[FUSION FALLBACK] fusion_weights empty. Ranked proposals: {ranked_proposals}",
-            phase="fusion",
+            top = ranked_proposals[0]
+            controller.last_final_proposal = top
+            return top.get("content", "")
+
+        # -----------------------------------------------------
+        # 2. Otherwise → call MAX‑HYBRID fused_response()
+        # -----------------------------------------------------
+        print(">>> CALLING fused_response() — MAX‑HYBRID MODE ACTIVE <<<")
+
+        final_text = fused_response(
+            fusion_weights=fusion_weights,
+            ranked_proposals=ranked_proposals,
+            controller=controller,
         )
 
-        if not ranked_proposals:
-            log_error(
-                "[FUSION FALLBACK] No ranked proposals available.",
-                phase="fusion",
-            )
-            return "The Continuum encountered an error: no proposals available."
-
-        first = ranked_proposals[0]
-        log_debug(
-            f"[FUSION FALLBACK] First proposal actor: {first.get('actor')}",
-            phase="fusion",
-        )
-
-        log_info("Fusion weights empty — using single actor path", phase="fusion")
-
-        final_proposal = first
-        actor_name = final_proposal.get("actor")
-        llm_name = controller.senate_to_llm_map.get(actor_name, actor_name)
-        actor = controller.actors.get(llm_name)
-
-        log_debug(
-            f"[FUSION FALLBACK] Using actor '{llm_name}' for fallback generation.",
-            phase="fusion",
-        )
-
-        if not actor:
-            log_error(
-                f"Unknown actor during fallback fusion path: {llm_name}",
-                phase="fusion",
-            )
-            return "The Continuum encountered an error: unknown actor."
-
-        final_text = actor.respond(
-            context=controller.context,
-            selected_proposal=final_proposal,
-            emotional_memory=controller.emotional_memory,
-            emotional_state=controller.emotional_state,
-        )
-
-        log_debug(
-            f"[FUSION FALLBACK] Actor returned text: {final_text}",
-            phase="fusion",
-        )
+        # Ensure last_final_proposal is set
+        if not controller.last_final_proposal:
+            controller.last_final_proposal = ranked_proposals[0]
 
         self.last_final_text = final_text
         return final_text
