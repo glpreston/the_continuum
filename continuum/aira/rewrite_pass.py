@@ -1,10 +1,8 @@
-# aira/rewrite_pass.py
-
+# continuum/aira/rewrite_pass.py
 from typing import Optional
 
 from continuum.core.logger import log_debug, log_error
 from continuum.aira.prompt import build_prompt
-
 
 def _apply_temperature_curve(
     base_temperature: float,
@@ -30,6 +28,7 @@ def _apply_temperature_curve(
 def rewrite_pass(
     llm_client,
     model: str,
+    endpoint: str,
     text_to_rewrite: str,
     memory_summary: str,
     emotion_label: str,
@@ -38,11 +37,11 @@ def rewrite_pass(
     pass_index: int,
 ) -> Optional[str]:
     """
-    Perform a single Aira rewrite pass.
+    Perform a single Aira rewrite pass (Router-aware).
 
     - Builds the prompt using Aira's voice template.
     - Applies a diminishing temperature curve based on pass_index.
-    - Calls the LLM client.
+    - Calls the LLM client on the SAME endpoint as main generation.
     - Returns the rewritten text or None on failure.
     """
 
@@ -63,7 +62,8 @@ def rewrite_pass(
 
     log_debug(
         f"[AIRA] Starting rewrite pass {pass_index} "
-        f"with model={model}, temperature={temperature:.4f}, max_tokens={max_tokens}"
+        f"with model={model}, endpoint={endpoint}, "
+        f"temperature={temperature:.4f}, max_tokens={max_tokens}"
     )
 
     try:
@@ -72,6 +72,7 @@ def rewrite_pass(
             model=model,
             temperature=temperature,
             max_tokens=max_tokens,
+            endpoint=endpoint,
         )
 
         if not rewritten:

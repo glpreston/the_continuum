@@ -2,11 +2,13 @@
 
 from continuum.actors.senate_base import SenateBase
 
-
 class SenateArchitect(SenateBase):
     """
-    Phase‑4 Senate wrapper for the Architect LLM actor.
-    Delegates proposal generation to the underlying LLM actor.
+    Modernized Senate wrapper for the Architect LLM actor.
+    Router-aware, model-agnostic, and simplified.
+
+    Delegates proposal generation to the underlying LLM actor,
+    which now uses controller.last_routing_decision for model/node selection.
     """
 
     def __init__(self, llm_actor):
@@ -17,27 +19,33 @@ class SenateArchitect(SenateBase):
         context,
         message,
         controller,
-        model,
-        temperature,
-        max_tokens,
-        system_prompt,
         memory,
         emotional_state,
+        emotional_memory,
         voiceprint,
         metadata,
         telemetry,
     ):
+        """
+        Modernized propose() signature:
+        - No model
+        - No temperature
+        - No max_tokens
+        - No system_prompt
+
+        All of those are now handled by:
+        - Router (model + node)
+        - BaseLLMActor (temperature, max_tokens, system_prompt)
+        """
+
         # Delegate to the underlying LLM actor
         llm_proposal = self.llm_actor.propose(
             context=context,
             message=message,
             controller=controller,
-            model=model,
-            temperature=temperature,
-            max_tokens=max_tokens,
-            system_prompt=system_prompt,
             memory=memory,
             emotional_state=emotional_state,
+            emotional_memory=emotional_memory,
             voiceprint=voiceprint,
             metadata=metadata,
             telemetry=telemetry,

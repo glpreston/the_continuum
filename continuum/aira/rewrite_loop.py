@@ -1,4 +1,4 @@
-# aira/rewrite_loop.py
+# continuum/aira/rewrite_loop.py
 
 from continuum.core.logger import log_debug, log_error
 
@@ -13,6 +13,7 @@ from continuum.aira.safety import (
 def rewrite_loop(
     llm_client,
     model: str,
+    endpoint: str,
     base_text: str,
     memory_summary: str,
     emotion_label: str,
@@ -22,7 +23,7 @@ def rewrite_loop(
     early_stop_threshold: float = 0.92,
 ):
     """
-    Perform Aira's full multi-pass rewrite loop.
+    Perform Aira's full multi-pass rewrite loop (Router-aware).
 
     Responsibilities:
     - Run multiple rewrite passes
@@ -38,7 +39,7 @@ def rewrite_loop(
 
     log_debug(
         f"[AIRA] Starting rewrite loop: depth={max_rewrite_depth}, "
-        f"model={model}, base_len={len(base_text)}"
+        f"model={model}, endpoint={endpoint}, base_len={len(base_text)}"
     )
 
     current_text = base_text
@@ -49,6 +50,7 @@ def rewrite_loop(
         rewritten = rewrite_pass(
             llm_client=llm_client,
             model=model,
+            endpoint=endpoint,
             text_to_rewrite=current_text,
             memory_summary=memory_summary,
             emotion_label=emotion_label,

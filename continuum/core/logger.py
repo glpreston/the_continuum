@@ -1,3 +1,4 @@
+# continuum/core/logger.py
 import logging
 import os
 from datetime import datetime
@@ -25,7 +26,7 @@ DEBUG_LOG_PATH = os.path.join(os.getcwd(), "logs", "debug.log")
 
 # Configure root logger with UTF‑8 encoding
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.DEBUG,
     format="%(asctime)s [%(levelname)s] [%(message)s",
     handlers=[
         logging.FileHandler(SESSION_LOG_PATH, encoding="utf-8"),

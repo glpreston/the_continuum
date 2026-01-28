@@ -109,12 +109,9 @@ def run_phase4_senate_test():
     context = ContinuumContext(conversation_id=str(uuid.uuid4()))
     message = "Explain how a city could redesign its public spaces to improve community connection."
 
-    model = "gpt-4.1"
-    temperature = 0.7
-    max_tokens = 500
-    system_prompt = "You are a helpful Senate actor."
     memory = {}
     emotional_state = {"mood": "curious", "intensity": 0.4}
+    emotional_memory = {}
     voiceprint = {"style": "neutral"}
     metadata = {}
     telemetry = {}
@@ -125,12 +122,9 @@ def run_phase4_senate_test():
         context=context,
         message=message,
         controller=controller,
-        model=model,
-        temperature=temperature,
-        max_tokens=max_tokens,
-        system_prompt=system_prompt,
         memory=memory,
         emotional_state=emotional_state,
+        emotional_memory=emotional_memory,
         voiceprint=voiceprint,
         metadata=metadata,
         telemetry=telemetry,

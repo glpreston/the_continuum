@@ -47,9 +47,6 @@ class DeliberationEngine:
         # ---------------------------------------------------------
         # 1. No model selection here — actors handle it internally
         # ---------------------------------------------------------
-        temperature = controller.temperature
-        max_tokens = controller.max_tokens
-        system_prompt = controller.system_prompt
         memory = emotional_memory
         voiceprint = controller.voiceprint
         metadata = {}
@@ -64,11 +61,9 @@ class DeliberationEngine:
             context=context,
             message=message,
             controller=controller,
-            temperature=temperature,
-            max_tokens=max_tokens,
-            system_prompt=system_prompt,
             memory=memory,
             emotional_state=emotional_state,
+            emotional_memory=emotional_memory,
             voiceprint=voiceprint,
             metadata=metadata,
             telemetry=telemetry,

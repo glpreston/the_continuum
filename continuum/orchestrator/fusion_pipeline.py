@@ -1,132 +1,66 @@
 # continuum/orchestrator/fusion_pipeline.py
+# Modernized Fusion pipeline (Router-aware)
 
-from typing import Dict, List, Optional
-from continuum.core.logger import log_info, log_debug, log_error
-
-from continuum.orchestrator.fusion_smoothing import FusionSmoother
-from continuum.emotion.emotional_momentum import apply_emotional_momentum
-from continuum.orchestrator.fusion_engine import fused_response
+from continuum.core.logger import log_debug, log_error
 
 
 class FusionPipeline:
     """
-    Fusion Pipeline (patched for MAX‑HYBRID Fusion)
-      - smoothing
-      - depth boost
-      - emotional momentum
-      - fused multi‑actor response
-      - clean fallback path
+    Modernized Fusion pipeline.
+    Router-aware, model-agnostic, and simplified.
+
+    Responsibilities:
+      - Adjust fusion weights
+      - Run fusion engine
+      - Pass routing metadata through
     """
 
-    def __init__(self, smoother: FusionSmoother, emotional_arc_engine):
-        self.smoother = smoother
-        self.emotional_arc_engine = emotional_arc_engine
-
-        # Debug traces
-        self.last_raw_weights: Dict[str, float] = {}
-        self.last_smoothed_weights: Dict[str, float] = {}
-        self.last_final_text: Optional[str] = None
+    def __init__(self, controller, fusion_engine, fusion_filters):
+        self.controller = controller
+        self.fusion_engine = fusion_engine
+        self.fusion_filters = fusion_filters
 
     # ---------------------------------------------------------
-    # APPLY SMOOTHING + EMOTIONAL MOMENTUM + DEPTH BOOST
+    # Adjust fusion weights
     # ---------------------------------------------------------
-    def adjust(self, final_proposal: Dict) -> Dict[str, float]:
+    def adjust(self, final_proposal):
         """
-        Extracts fusion weights from the final proposal and applies:
-          - smoothing
-          - depth-aware boost (semantic depth + structure)
-          - emotional momentum
+        Adjust fusion weights based on the final proposal.
+        Router-aware: routing metadata is available if needed.
         """
-
-        metadata = final_proposal.get("metadata", {}) or {}
-        raw_weights = metadata.get("fusion_weights", {}) or {}
-        self.last_raw_weights = raw_weights
-
-        log_info("Applying fusion smoothing and emotional momentum", phase="fusion")
-
-        # Step 1: smoothing
-        smoothed = self.smoother.smooth(raw_weights)
-        self.last_smoothed_weights = smoothed
-
-        # Step 1.5: depth-aware boost
-        jury_all_scores = metadata.get("jury_all_scores", {}) or {}
-
-        depth_boosted: Dict[str, float] = {}
-        for actor_name, weight in smoothed.items():
-            actor_scores = jury_all_scores.get(actor_name, {}) or {}
-            semantic_depth = actor_scores.get("semantic_depth", 0.0)
-            structure_score = actor_scores.get("structure", 0.0)
-
-            depth_factor = 1.0 + 0.35 * semantic_depth + 0.20 * structure_score
-            depth_boosted[actor_name] = weight * depth_factor
-
-        # Renormalize
-        total_boosted = sum(depth_boosted.values()) or 1.0
-        depth_boosted = {k: v / total_boosted for k, v in depth_boosted.items()}
+        routing = self.controller.last_routing_decision
 
         log_debug(
-            f"Fusion weights after depth boost: {depth_boosted}",
-            phase="fusion",
+            f"[FUSION] Adjusting fusion weights (intent={routing.get('intent') if routing else None})",
+            phase="fusion"
         )
 
-        # Step 2: emotional momentum
-        adjusted = apply_emotional_momentum(
-            depth_boosted,
-            self.emotional_arc_engine.get_history(),
-        )
-
-        log_debug(
-            f"Fusion weights after smoothing/momentum: {adjusted}",
-            phase="fusion",
-        )
-
-        return adjusted
+        # Existing logic unchanged
+        return self.fusion_filters.adjust(final_proposal)
 
     # ---------------------------------------------------------
-    # RUN FUSION OR FALLBACK
+    # Run fusion
     # ---------------------------------------------------------
-    def run(
-        self,
-        fusion_weights: Dict[str, float],
-        ranked_proposals: List[Dict],
-        controller,
-    ) -> str:
+    def run(self, fusion_weights, ranked_proposals, controller, routing=None):
         """
-        Executes:
-          - fused multi‑actor response (if weights exist)
-          - fallback single‑actor path (if no weights)
+        Execute the fusion engine.
+
+        Router-aware:
+          - routing metadata is passed into the fusion engine
+          - fusion can use model/node info if needed
         """
 
-        print("\n>>> ENTERED FusionPipeline.run() <<<")
+        routing = routing or controller.last_routing_decision
 
-        # -----------------------------------------------------
-        # 1. If no fusion weights → fallback to Jury winner
-        # -----------------------------------------------------
-        if not fusion_weights or sum(fusion_weights.values()) == 0:
-            print(">>> NO FUSION WEIGHTS — FALLBACK TO SINGLE ACTOR <<<")
+        log_error("🔥 FUSION ENGINE RUN (Router-aware) 🔥", phase="fusion")
 
-            if not ranked_proposals:
-                log_error("No ranked proposals available.", phase="fusion")
-                return "The Continuum encountered an error: no proposals available."
-
-            top = ranked_proposals[0]
-            controller.last_final_proposal = top
-            return top.get("content", "")
-
-        # -----------------------------------------------------
-        # 2. Otherwise → call MAX‑HYBRID fused_response()
-        # -----------------------------------------------------
-        print(">>> CALLING fused_response() — MAX‑HYBRID MODE ACTIVE <<<")
-
-        final_text = fused_response(
+        fused = self.fusion_engine.run(
             fusion_weights=fusion_weights,
             ranked_proposals=ranked_proposals,
             controller=controller,
+            routing=routing,   # ⭐ NEW: routing passed into fusion engine
         )
 
-        # Ensure last_final_proposal is set
-        if not controller.last_final_proposal:
-            controller.last_final_proposal = ranked_proposals[0]
+        log_debug(f"[FUSION] Fused output: {fused}", phase="fusion")
 
-        self.last_final_text = final_text
-        return final_text
+        return fused

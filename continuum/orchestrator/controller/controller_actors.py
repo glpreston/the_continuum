@@ -1,102 +1,108 @@
 # continuum/orchestrator/controller/controller_actors.py
+# Phase‑5 clean actor + Senate initialization
 
 import os
 from continuum.core.logger import log_debug
 
+# LLM actors
 from continuum.actors.architect import Architect
-from continuum.actors.storyweaver import Storyweaver
 from continuum.actors.analyst import Analyst
+from continuum.actors.storyweaver import Storyweaver
 from continuum.actors.synthesizer import Synthesizer
 
+# Senate wrappers
+from continuum.actors.senate_architect import SenateArchitect
+from continuum.actors.senate_analyst import SenateAnalyst
+from continuum.actors.senate_storyweaver import SenateStoryweaver
+from continuum.actors.senate_synthesizer import SenateSynthesizer
 from continuum.orchestrator.senate import Senate
-from continuum.orchestrator.jury import Jury
-from continuum.orchestrator.deliberation_engine import DeliberationEngine
-
-
-def load_prompt(name: str) -> str:
-    base = os.path.join(os.path.dirname(__file__), "..", "actors", "prompts")
-    path = os.path.abspath(os.path.join(base, name))
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            return f.read()
-    except Exception as e:
-        return f"[ERROR: could not load prompt {name}: {e}]"
 
 
 def initialize_actors_and_senate(controller):
     """
-    Initializes actors using DB-backed registry.actor_profiles.
-    Replaces the old config-based actor loading system.
+    Phase‑5 actor initialization:
+      - No model_name or fallback_model
+      - Actors are Router‑agnostic
+      - Senate wrappers are clean and simple
+      - Controller stores actors + Senate in a predictable structure
     """
 
-    controller.actors = {}
-    registry = controller.registry
+    log_debug("[ACTORS] Initializing Phase‑5 actors", phase="actors")
 
-    # Map DB actor names → prompt files + Python classes
-    ACTOR_MAP = {
-        "Architect": ("architect_prompt.txt", Architect),
-        "Storyweaver": ("storyweaver_prompt.txt", Storyweaver),
-        "Analyst": ("analyst_prompt.txt", Analyst),
-        "Synthesizer": ("synthesizer_prompt.txt", Synthesizer),
+    # ---------------------------------------------------------
+    # 1. Instantiate LLM actors (Router‑agnostic)
+    # ---------------------------------------------------------
+    architect = Architect(controller)
+    analyst = Analyst(controller)
+    storyweaver = Storyweaver(controller)
+    synthesizer = Synthesizer(controller)
+
+    controller.actors = {
+        "Architect": architect,
+        "Analyst": analyst,
+        "Storyweaver": storyweaver,
+        "Synthesizer": synthesizer,
     }
 
-    # ---------------------------------------------------------
-    # Load actors from DB
-    # ---------------------------------------------------------
-    for actor_name, profile in registry.actor_profiles.items():
-
-        if actor_name not in ACTOR_MAP:
-            raise ValueError(f"Unknown actor in DB: {actor_name}")
-
-        prompt_file, actor_cls = ACTOR_MAP[actor_name]
-        system_prompt = load_prompt(prompt_file)
-
-        actor = actor_cls(
-            name=actor_name,
-            model_name=profile.model_name,
-            fallback_model=profile.fallback_model,
-            personality=profile.personality,
-            system_prompt=system_prompt,
-            temperature=profile.temperature_default,
-            max_tokens=profile.context_window,
-            controller=controller,
-        )
-
-        controller.actors[actor_name] = actor
-
-        log_debug(f"[ACTORS] Loaded actor '{actor_name}'", phase="actors")
+    log_debug("[ACTORS] LLM actors instantiated", phase="actors")
 
     # ---------------------------------------------------------
-    # Senate
+    # 2. Senate wrappers
     # ---------------------------------------------------------
-    controller.senate = Senate([
-        controller.actors["Architect"],
-        controller.actors["Storyweaver"],
-        controller.actors["Analyst"],
-        controller.actors["Synthesizer"],
-    ])
+    senate_architect = SenateArchitect(architect)
+    senate_analyst = SenateAnalyst(analyst)
+    senate_storyweaver = SenateStoryweaver(storyweaver)
+    senate_synthesizer = SenateSynthesizer(synthesizer)
+
+    controller.senate_actors = {
+        "Architect": senate_architect,
+        "Analyst": senate_analyst,
+        "Storyweaver": senate_storyweaver,
+        "Synthesizer": senate_synthesizer,
+    }
+
+    log_debug("[ACTORS] Senate wrappers instantiated", phase="actors")
 
     # ---------------------------------------------------------
-    # Jury
+    # 3. Senate list (ordered)
     # ---------------------------------------------------------
+    
+    senate_members = [
+        senate_architect,
+        senate_analyst,
+        senate_storyweaver,
+        senate_synthesizer,
+    ]
+
+    controller.senate_members = senate_members
+    controller.senate = Senate(senate_members)
+
+    log_debug("[ACTORS] Senate list created", phase="actors")
+
+    # ---------------------------------------------------------
+    # 3.5 Jury initialization (Phase‑5)
+    # ---------------------------------------------------------
+    from continuum.orchestrator.jury import Jury
     controller.jury = Jury()
 
-    # ---------------------------------------------------------
-    # Deliberation Engine
-    # ---------------------------------------------------------
-    controller.deliberation_engine = DeliberationEngine(
-        senate=controller.senate,
-        jury=controller.jury,
-    )
 
     # ---------------------------------------------------------
-    # Actor enable/disable settings
+    # 3.5 Jury initialization (Phase‑5)
+    # ---------------------------------------------------------
+    from continuum.orchestrator.jury import Jury
+    controller.jury = Jury()
+
+
+    # ---------------------------------------------------------
+    # 4. Actor enable/disable settings
     # ---------------------------------------------------------
     controller.actor_settings = {
         "Architect": {"enabled": True},
-        "Storyweaver": {"enabled": True},
         "Analyst": {"enabled": True},
+        "Storyweaver": {"enabled": True},
         "Synthesizer": {"enabled": True},
     }
 
-    log_debug("[ACTORS] Actor system initialization complete", phase="actors")
+    log_debug("[ACTORS] Actor settings initialized", phase="actors")
+
+    log_debug("[ACTORS] Phase‑5 actor system initialization complete", phase="actors")

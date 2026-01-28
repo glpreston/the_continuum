@@ -1,122 +1,91 @@
 # continuum/orchestrator/fusion_filters.py
+# Modernized Fusion Filters (Router-aware, model-agnostic)
 
-import re
-from typing import List
-
-
-# ---------------------------------------------------------
-# 1. Refusal / Safety / Meta‑Commentary Patterns
-# ---------------------------------------------------------
-
-REFUSAL_PATTERNS = [
-    r"^i\s+can(\'t|not)\b",
-    r"^i\s+am\s+unable\b",
-    r"^i\s+am\s+not\s+able\b",
-    r"^i\s+am\s+not\s+permitted\b",
-    r"^i\s+must\s+ensure\b",
-    r"^i\s+cannot\b",
-    r"^i\s+can\s+not\b",
-]
-
-META_PATTERNS = [
-    r"^the\s+user(\'s)?\s+request\b",
-    r"^the\s+user(\'s)?\s+message\b",        # NEW — catches “The user’s message…”
-    r"^the\s+user\s+is\s+asking\b",
-    r"^the\s+user\s+is\s+expressing\b",
-    r"^this\s+prompt\s+can\s+be\s+broken\b",
-    r"^it(\'s| is)\s+essential\b",
-    r"^to\s+provide\b",
-    r"^the\s+statement\s+is\b",
-    r"^the\s+question\s+is\b",
-]
-
-SAFETY_PATTERNS = [
-    r"consult\s+a\s+professional",
-    r"medical\s+advice",
-    r"legal\s+advice",
-    r"ensure\s+safety",
-]
+from continuum.core.logger import log_debug
 
 
-# ---------------------------------------------------------
-# 2. Narrative Fragment Detection
-# ---------------------------------------------------------
+class FusionFilters:
+    """
+    Phase‑5 Fusion Filters.
 
-NARRATIVE_STARTERS = [
-    r"^as\s+she\b",
-    r"^as\s+he\b",
-    r"^as\s+the\b",
-    r"^as\s+they\b",
-]
+    Responsibilities:
+      - Compute fusion weights for each actor
+      - Remain model-agnostic (Router decides model/node)
+      - Accept routing metadata for future adaptive weighting
+    """
 
+    def __init__(self, controller):
+        self.controller = controller
 
-# ---------------------------------------------------------
-# 3. Utility: Sentence Fragment Detection
-# ---------------------------------------------------------
+    # ---------------------------------------------------------
+    # Main weight adjustment entry point
+    # ---------------------------------------------------------
+    def adjust(self, final_proposal):
+        """
+        Compute fusion weights.
 
-def is_fragment(sentence: str) -> bool:
-    """Detects incomplete or dangling sentences."""
-    s = sentence.strip().rstrip(",;:")
+        Args:
+            final_proposal: the Jury's chosen proposal
+            (contains actor, content, metadata)
 
-    # Too short to be meaningful
-    if len(s.split()) < 4:
-        return True
+        Returns:
+            dict: actor_name → weight
+        """
 
-    # Must contain at least one verb-like pattern
-    if not re.search(
-        r"\b(is|are|was|were|be|being|been|has|have|had|do|does|did|can|could|will|would|should|may|might)\b",
-        s,
-    ):
-        return True
+        routing = self.controller.last_routing_decision
 
-    # Dangling endings
-    if s.endswith(("and", "or", "but", "so", "because", "as")):
-        return True
+        log_debug(
+            f"[FUSION FILTERS] Adjusting weights (intent={routing.get('intent') if routing else None})",
+            phase="fusion"
+        )
 
-    # NEW: detect truncated last words (e.g., "powde")
-    last_word = s.split()[-1]
-    if len(last_word) <= 4 and not re.search(r"[aeiou]", last_word):
-        return True
+        # ---------------------------------------------------------
+        # Phase‑4 behavior preserved:
+        #   - All actors get equal weight unless overridden
+        # ---------------------------------------------------------
+        actor = final_proposal.get("actor", "Unknown")
 
-    return False
+        weights = {
+            "Architect": 1.0,
+            "Analyst": 1.0,
+            "Storyweaver": 1.0,
+            "Synthesizer": 1.0,
+        }
 
+        # ---------------------------------------------------------
+        # Phase‑5 extension point:
+        #   - Intent-aware weighting
+        #   - Model-aware weighting
+        #   - Actor bias from DB
+        # ---------------------------------------------------------
+        if routing:
+            intent = routing.get("intent")
+            model_choice = routing.get("model_selection", {})
+            node_choice = routing.get("node_selection", {})
 
-# ---------------------------------------------------------
-# 4. Main Filter Function
-# ---------------------------------------------------------
+            # Example: if intent is "analysis", boost Analyst
+            if intent == "analysis":
+                weights["Analyst"] += 0.5
 
-def filter_sentence(sentence: str, user_message: str) -> bool:
-    """Returns True if the sentence should be kept; False if removed."""
+            # Example: if intent is "story", boost Storyweaver
+            if intent == "story":
+                weights["Storyweaver"] += 0.5
 
-    s = sentence.strip().lower()
+            # Example: if Synthesizer is the top model's preferred actor
+            top_model = None
+            if model_choice.get("candidates"):
+                top_model = model_choice["candidates"][0]["model"]
 
-    # Remove user‑echo
-    if user_message and user_message.lower() in s:
-        return False
+            if top_model and "synth" in top_model.lower():
+                weights["Synthesizer"] += 0.25
 
-    # Refusal frames
-    if any(re.match(p, s) for p in REFUSAL_PATTERNS):
-        return False
+        # ---------------------------------------------------------
+        # Normalize weights
+        # ---------------------------------------------------------
+        total = sum(weights.values())
+        if total > 0:
+            for k in weights:
+                weights[k] /= total
 
-    # Meta‑commentary
-    if any(re.match(p, s) for p in META_PATTERNS):
-        return False
-
-    # Safety misfires
-    if any(re.search(p, s) for p in SAFETY_PATTERNS):
-        return False
-
-    # Narrative fragments (only remove if incomplete)
-    if any(re.match(p, s) for p in NARRATIVE_STARTERS) and is_fragment(s):
-        return False
-
-    # General fragments
-    if is_fragment(s):
-        return False
-
-    return True
-
-
-def filter_sentences(sentences: List[str], user_message: str) -> List[str]:
-    """Applies semantic filtering to a list of sentences."""
-    return [s for s in sentences if filter_sentence(s, user_message)]
+        log_debug(f"[FUSION FILTERS] Final weights: {weights}", phase="fusion")
+        return weights

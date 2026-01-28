@@ -1,27 +1,59 @@
 # continuum/llm/llm_client.py
+# Modernized, Router-aware LLM client
 
 import requests
-import time
-from continuum.monitoring.model_stats import log_model_call
+import json
 
 
 class LLMClient:
     """
-    Ollama Cloud LLM client.
-    Sends prompts to Ollama Cloud using the /api/generate endpoint.
+    Phase‑5 LLM Client.
+
+    Stateless, Router-aware, and multi-node capable.
+
+    The caller provides:
+      - endpoint (from NodeSelectorV2)
+      - model (from ModelSelectorV2)
+      - prompt
+      - temperature
+      - max_tokens
+
+    This client simply executes the request.
     """
 
-    def __init__(self, endpoint: str = "http://localhost:11434/api/generate"):
-        self.endpoint = endpoint
+    def __init__(self, default_endpoint="http://localhost:11434/api/generate"):
+        self.default_endpoint = default_endpoint
+        self.endpoint = default_endpoint   # ⭐ ADD THIS
+        
+    # ---------------------------------------------------------
+    # Main LLM call
+    # ---------------------------------------------------------
+    def generate(
+        self,
+        prompt: str,
+        model: str,
+        temperature: float = 0.7,
+        max_tokens: int = 512,
+        endpoint: str = None,
+    ):
+        """
+        Execute an LLM request.
 
-    def generate(self, prompt: str, model: str = None, temperature: float = 0.7, max_tokens: int = 512):
-        import json
-        import requests
+        Args:
+            prompt: final prompt string
+            model: model name chosen by Router
+            temperature: sampling temperature
+            max_tokens: max tokens to generate
+            endpoint: node endpoint chosen by Router
 
-        model_used = model
+        Returns:
+            full_text: the streamed LLM output
+        """
+
+        endpoint = endpoint or self.default_endpoint
 
         payload = {
-            "model": model_used,
+            "model": model,
             "prompt": prompt,
             "options": {
                 "temperature": temperature,
@@ -29,53 +61,30 @@ class LLMClient:
             },
         }
 
-        # -----------------------------
-        # Step 4: Start latency timer
-        # -----------------------------
-        start = time.time()
-
         try:
-            # Enable streaming
-            response = requests.post(self.endpoint, json=payload, stream=True)
+            response = requests.post(endpoint, json=payload, stream=True)
+        except Exception as e:
+            return f"[ERROR] LLM request failed: {e}"
 
-            if response.status_code != 200:
-                # Log failure
-                latency_ms = int((time.time() - start) * 1000)
-                log_model_call(model_used, False, latency_ms)
-                return f"[ERROR] Ollama returned {response.status_code}: {response.text}"
+        if response.status_code != 200:
+            return f"[ERROR] LLM returned {response.status_code}: {response.text}"
 
-            full_text = ""
+        full_text = ""
 
-            # Ollama streams NDJSON — one JSON object per line
-            for line in response.iter_lines():
-                if not line:
-                    continue
+        # Ollama streams NDJSON — one JSON object per line
+        for line in response.iter_lines():
+            if not line:
+                continue
 
-                try:
-                    obj = json.loads(line.decode("utf-8"))
-                except Exception:
-                    continue
+            try:
+                obj = json.loads(line.decode("utf-8"))
+            except Exception:
+                continue
 
-                # Accumulate tokens
-                if "response" in obj:
-                    full_text += obj["response"]
+            if "response" in obj:
+                full_text += obj["response"]
 
-                # Stop when Ollama signals completion
-                if obj.get("done"):
-                    break
+            if obj.get("done"):
+                break
 
-            # -----------------------------
-            # Step 4: Log success
-            # -----------------------------
-            latency_ms = int((time.time() - start) * 1000)
-            log_model_call(model_used, True, latency_ms)
-
-            return full_text
-
-        except Exception:
-            # -----------------------------
-            # Step 4: Log failure
-            # -----------------------------
-            latency_ms = int((time.time() - start) * 1000)
-            log_model_call(model_used, False, latency_ms)
-            raise
+        return full_text

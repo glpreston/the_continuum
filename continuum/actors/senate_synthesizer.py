@@ -2,49 +2,39 @@
 
 from continuum.actors.senate_base import SenateBase
 
-
 class SenateSynthesizer(SenateBase):
     """
-    Phase‑4 Senate wrapper for the Synthesizer LLM actor.
-    Delegates proposal generation to the underlying LLM actor.
+    Modernized Senate wrapper for the Synthesizer LLM actor.
+    Router-aware and simplified.
     """
 
     def __init__(self, llm_actor):
-        super().__init__(llm_actor, "SenateSynthesizer")
+        super().__init__(llm_actor, "Synthesizer")
 
     def propose(
         self,
         context,
         message,
         controller,
-        model,
-        temperature,
-        max_tokens,
-        system_prompt,
         memory,
         emotional_state,
+        emotional_memory,
         voiceprint,
         metadata,
         telemetry,
     ):
-        # Delegate to the underlying LLM actor using the Phase‑4 signature
         llm_proposal = self.llm_actor.propose(
             context=context,
             message=message,
             controller=controller,
-            model=model,
-            temperature=temperature,
-            max_tokens=max_tokens,
-            system_prompt=system_prompt,
             memory=memory,
             emotional_state=emotional_state,
+            emotional_memory=emotional_memory,
             voiceprint=voiceprint,
             metadata=metadata,
             telemetry=telemetry,
         )
 
-        # Tag as Senate output
-        llm_proposal["actor"] = "SenateSynthesizer"
-        llm_proposal["metadata"]["senate_actor"] = True
-
+        llm_proposal["actor"] = "Synthesizer"
+        llm_proposal.setdefault("metadata", {})["senate_actor"] = True
         return llm_proposal

@@ -1,5 +1,7 @@
+#continuum/orchestrator/senate.py
 from typing import List, Dict, Any
 from sklearn.feature_extraction.text import TfidfVectorizer
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from continuum.persona.topics import detect_topic, TOPIC_ACTOR_WEIGHTS
 from continuum.core.logger import log_info, log_debug, log_error
 
@@ -18,16 +20,16 @@ class Senate:
     # ---------------------------------------------------------
     # COLLECT PROPOSALS (Phase‑4)
     # ---------------------------------------------------------
+
+
     def gather_proposals(
         self,
         context,
         message: str,
         controller,
-        temperature,
-        max_tokens,
-        system_prompt,
         memory,
         emotional_state,
+        emotional_memory,
         voiceprint,
         metadata,
         telemetry,
@@ -36,78 +38,101 @@ class Senate:
         proposals: List[Dict[str, Any]] = []
 
         log_error("🔥🔥🔥 ENTERED gather_proposals() 🔥🔥🔥", phase="senate")
-        log_info("[SENATE] Gathering proposals from actors", phase="senate")
+        log_info("[SENATE] Gathering proposals from actors (parallel mode)", phase="senate")
 
-        for actor in self.actors:
+        # ---------------------------------------------------------
+        # PARALLEL EXECUTION OF ACTORS
+        # ---------------------------------------------------------
+        with ThreadPoolExecutor(max_workers=len(self.actors)) as executor:
 
-            # Skip disabled actors
-            if not controller.actor_settings.get(actor.name, {}).get("enabled", True):
-                log_debug(f"[SENATE] Actor {actor.name} is disabled — skipping", phase="senate")
-                continue
+            future_map = {}
 
-            try:
-                # -------------------------------------------------
-                # 1) Generate proposal (Phase‑4: actor selects model internally)
-                # -------------------------------------------------
-                log_debug(f"[SENATE] Calling propose() on {actor.name}", phase="senate")
+            for actor in self.actors:
 
-                proposal = actor.propose(
+                # Skip disabled actors
+                if not controller.actor_settings.get(actor.name, {}).get("enabled", True):
+                    log_debug(f"[SENATE] Actor {actor.name} is disabled — skipping", phase="senate")
+                    continue
+
+                log_debug(f"[SENATE] Submitting {actor.name} to executor", phase="senate")
+
+                future = executor.submit(
+                    actor.propose,
                     context=context,
                     message=message,
                     controller=controller,
-                    temperature=temperature,
-                    max_tokens=max_tokens,
-                    system_prompt=system_prompt,
                     memory=memory,
                     emotional_state=emotional_state,
+                    emotional_memory=emotional_memory,
                     voiceprint=voiceprint,
                     metadata=metadata,
                     telemetry=telemetry,
                 )
 
-                log_debug(f"[SENATE] Raw proposal from {actor.name}: {proposal}", phase="senate")
-                log_error(f"[FORENSICS] Senate received proposal type={type(proposal)} value={repr(proposal)}", phase="senate")
+                future_map[future] = actor
 
-                # Ensure metadata exists
-                metadata_obj = proposal.get("metadata") or {}
-                proposal["metadata"] = metadata_obj
+            # ---------------------------------------------------------
+            # COLLECT RESULTS AS THEY COMPLETE
+            # ---------------------------------------------------------
+            for future in as_completed(future_map):
+                actor = future_map[future]
 
-                # -------------------------------------------------
-                # 2) Apply actor weight
-                # -------------------------------------------------
-                weight = controller.actor_settings.get(actor.name, {}).get("weight", 1.0)
-                proposal["confidence"] = proposal.get("confidence", 0) * weight
+                try:
+                    proposal = future.result()
 
-                # -------------------------------------------------
-                # 3) Reasoning summary
-                # -------------------------------------------------
-                proposal["summary"] = actor.summarize_reasoning(proposal)
+                    # Normalize non-dict proposals into dict form
+                    if isinstance(proposal, str):
+                        proposal = {
+                            "actor": actor.name,
+                            "content": proposal,
+                            "confidence": 1.0,
+                            "metadata": {},
+                        }
 
-                # -------------------------------------------------
-                # 4) Optional audio
-                # -------------------------------------------------
-                if getattr(controller, "actor_voice_mode", False):
-                    if hasattr(actor, "speak_proposal"):
-                        proposal_audio = actor.speak_proposal(proposal["content"])
-                        proposal["audio"] = proposal_audio
+                    if not isinstance(proposal, dict):
+                        raise TypeError(
+                            f"Proposal from {actor.name} is not a dict or str: {type(proposal)}"
+                        )
 
-                proposals.append(proposal)
+                    log_debug(f"[SENATE] Raw proposal from {actor.name}: {proposal}", phase="senate")
+                    log_error(f"[FORENSICS] Senate received proposal type={type(proposal)} value={repr(proposal)}", phase="senate")
 
-            except Exception as e:
-                log_error(f"🔥🔥🔥 ERROR in actor {actor.name}: {e} 🔥🔥🔥", phase="senate")
-                proposals.append({
-                    "actor": actor.name,
-                    "content": None,
-                    "confidence": 0.0,
-                    "metadata": {
-                        "type": "error",
-                        "error": str(e),
-                    },
-                })
+                    # Ensure metadata exists
+                    metadata_obj = proposal.get("metadata") or {}
+                    proposal["metadata"] = metadata_obj
+
+                    # Apply actor weight
+                    weight = controller.actor_settings.get(actor.name, {}).get("weight", 1.0)
+                    proposal["confidence"] = proposal.get("confidence", 0) * weight
+
+                    # Reasoning summary
+                    if hasattr(actor, "summarize_reasoning"):
+                        proposal["summary"] = actor.summarize_reasoning(proposal)
+                    else:
+                        proposal["summary"] = "Summary unavailable."
+
+                    # Optional audio
+                    if getattr(controller, "actor_voice_mode", False):
+                        if hasattr(actor, "speak_proposal"):
+                            proposal_audio = actor.speak_proposal(proposal["content"])
+                            proposal["audio"] = proposal_audio
+
+                    proposals.append(proposal)
+
+                except Exception as e:
+                    log_error(f"🔥🔥🔥 ERROR in actor {actor.name}: {e} 🔥🔥🔥", phase="senate")
+                    proposals.append({
+                        "actor": actor.name,
+                        "content": None,
+                        "confidence": 0.0,
+                        "metadata": {
+                            "type": "error",
+                            "error": str(e),
+                        },
+                    })
 
         log_error(f"🔥🔥🔥 gather_proposals() COMPLETE — {len(proposals)} proposals 🔥🔥🔥", phase="senate")
         return proposals
-
     # ---------------------------------------------------------
     # FILTER PROPOSALS
     # ---------------------------------------------------------
@@ -159,11 +184,9 @@ class Senate:
         context,
         message: str,
         controller,
-        temperature,
-        max_tokens,
-        system_prompt,
         memory,
         emotional_state,
+        emotional_memory,
         voiceprint,
         metadata,
         telemetry,
@@ -179,11 +202,9 @@ class Senate:
             context=context,
             message=message,
             controller=controller,
-            temperature=temperature,
-            max_tokens=max_tokens,
-            system_prompt=system_prompt,
             memory=memory,
             emotional_state=emotional_state,
+            emotional_memory=emotional_memory,
             voiceprint=voiceprint,
             metadata=metadata,
             telemetry=telemetry,

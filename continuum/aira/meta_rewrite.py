@@ -1,4 +1,4 @@
-# aira/meta_rewrite.py
+# continuum/aira/meta_rewrite.py
 print("USING META_REWRITE FILE:", __file__)
 
 from typing import Optional
@@ -35,13 +35,15 @@ def meta_rewrite_llm(
     proposal: dict | None = None,
     emotion_label: str | None = None,
     enable_micro_polish: bool = True,
+    routing: dict | None = None,
     **kwargs,
 ) -> str:
     """
-    Aira Meta‑Persona rewrite hook.
+    Aira Meta‑Persona rewrite hook (Phase‑5, Router-aware).
 
     Pipeline:
     - Extract base text from core_text/proposal
+    - Use SAME model + node as main generation (via Router)
     - Build memory summary
     - Run multi‑pass rewrite loop
     - Optionally run micro‑polish
@@ -58,14 +60,49 @@ def meta_rewrite_llm(
     if not emotion_label:
         emotion_label = "neutral"
 
-    # Model + controller settings
-    rewrite_model = getattr(controller, "rewrite_model", "llama3.2:latest")
+    # Routing: use same model + node as main generation
+    routing = routing or getattr(controller, "last_routing_decision", None)
+    if not routing:
+        log_error("[AIRA] No routing decision available for rewrite; falling back to base_text")
+        return base_text
+
+    model_sel = routing.get("model_selection", {})
+    node_sel = routing.get("node_selection", {})
+
+    if not model_sel.get("candidates"):
+        log_error("[AIRA] Routing missing model candidates; falling back to base_text")
+        return base_text
+
+    model = model_sel["candidates"][0]["model"]
+    node = node_sel.get("selected_node")
+    if not node:
+        log_error("[AIRA] Routing missing selected_node; falling back to base_text")
+        return base_text
+
+    host = node.get("host")
+    port = node.get("port")
+    if not host:
+        log_error("[AIRA] Routing missing host; falling back to base_text")
+        return base_text
+
+    if host.startswith("http://") or host.startswith("https://"):
+        base = host.rstrip("/")
+        if port:
+            if ":" not in base.split("//", 1)[1]:
+                base = f"{base}:{port}"
+    else:
+        base = f"http://{host}"
+        if port:
+            base = f"{base}:{port}"
+
+    endpoint = f"{base}/api/generate"
+
+    # Controller settings
     llm_client = controller.llm_client
     base_temperature = getattr(controller, "temperature", 0.7)
     max_tokens = getattr(controller, "max_tokens", 1024)
     max_rewrite_depth = getattr(controller, "max_rewrite_depth", 3)
 
-    # Memory summary for Aira's prompt
     # Memory summary for Aira's prompt
     try:
         if hasattr(controller, "context") and hasattr(controller.context, "get_memory_summary"):
@@ -76,10 +113,10 @@ def meta_rewrite_llm(
         log_error(f"[AIRA] Error getting memory summary: {e}")
         memory_summary = ""
 
-
     log_debug(
-        f"[AIRA] Starting Aira rewrite with model={rewrite_model}, "
-        f"emotion_label={emotion_label}, max_rewrite_depth={max_rewrite_depth}"
+        f"[AIRA] Starting Aira rewrite with model={model}, "
+        f"endpoint={endpoint}, emotion_label={emotion_label}, "
+        f"max_rewrite_depth={max_rewrite_depth}"
     )
 
     # -----------------------------
@@ -88,7 +125,8 @@ def meta_rewrite_llm(
     try:
         rewritten = rewrite_loop(
             llm_client=llm_client,
-            model=rewrite_model,
+            model=model,
+            endpoint=endpoint,
             base_text=base_text,
             memory_summary=memory_summary,
             emotion_label=emotion_label,
@@ -113,7 +151,8 @@ def meta_rewrite_llm(
         try:
             polished = micro_polish(
                 llm_client=llm_client,
-                model=rewrite_model,
+                model=model,
+                endpoint=endpoint,
                 text=final_text,
                 temperature=0.3,
                 max_tokens=max_tokens,
