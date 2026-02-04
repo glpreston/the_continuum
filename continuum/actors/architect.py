@@ -6,7 +6,7 @@ class Architect(BaseLLMActor):
     def __init__(self, controller):
         super().__init__(
             name="Architect",
-            prompt_file="architect.txt",
+            prompt_file="architect_prompt.txt",
             persona="architect",
             system_prompt="You are the Architect.",
             temperature=0.7,
@@ -28,6 +28,7 @@ class Architect(BaseLLMActor):
         voiceprint,
         metadata,
         telemetry,
+        routing=None,
     ):
         """
         Phase‑5 propose(): delegates to BaseLLMActor.generate()
@@ -44,4 +45,5 @@ class Architect(BaseLLMActor):
             voiceprint=voiceprint,
             metadata=metadata,
             telemetry=telemetry,
+            routing=routing,
         )

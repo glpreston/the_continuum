@@ -46,16 +46,21 @@ class BaseRegistry:
         # Lookup tables
         self.nodes_by_id = {n.id: n for n in self.nodes}
         self.models_by_name = {m.name: m for m in self.models}
+        self.models_by_id = {m.id: m for m in self.models}   # ⭐ REQUIRED
 
         # model → nodes
         self.model_to_nodes = {}
         for link in self.model_nodes:
-            self.model_to_nodes.setdefault(link.model_name, []).append(link.node_id)
+            model = self.models_by_id.get(link.model_id)
+            if model:
+                self.model_to_nodes.setdefault(model.name, []).append(link.node_id)
 
         # node → models
         self.node_to_models = {}
         for link in self.model_nodes:
-            self.node_to_models.setdefault(link.node_id, []).append(link.model_name)
+            model = self.models_by_id.get(link.model_id)
+            if model:
+                self.node_to_models.setdefault(link.node_id, []).append(model.name)
 
     def get_node(self, node_id: int) -> Optional[Node]:
         return self.nodes_by_id.get(node_id)

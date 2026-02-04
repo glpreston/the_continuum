@@ -1,16 +1,8 @@
 # continuum/db/models/model_nodes.py
 
-from sqlalchemy import Column, Integer, String, ForeignKey, TIMESTAMP
+from sqlalchemy import Column, Integer, String, TIMESTAMP, Text, ForeignKey
 from sqlalchemy.orm import relationship
-from datetime import datetime
-from sqlalchemy import Enum as SAEnum
 from continuum.db.models.base import Base
-from enum import Enum
-
-
-class ModelAvailability(str, Enum):
-    available = "available"
-    unavailable = "unavailable"
 
 
 class ModelNode(Base):
@@ -18,20 +10,14 @@ class ModelNode(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
 
-    # MUST MATCH models.name EXACTLY
-    model_name = Column(String(255), ForeignKey("models.name"), nullable=False)
-
+    # NEW schema fields
+    model_id = Column(Integer, ForeignKey("models.id"), nullable=False)
     node_id = Column(Integer, ForeignKey("nodes.id"), nullable=False)
 
-    availability = Column(
-        SAEnum(ModelAvailability),
-        default=ModelAvailability.available,
-        nullable=False,
-    )
+    status = Column(String(50), default="available")
+    last_checked = Column(TIMESTAMP, nullable=True)
+    notes = Column(Text, nullable=True)
 
-    last_updated = Column(TIMESTAMP, default=datetime.utcnow)
-
-    notes = Column(String(5000))
-
+    # Relationships
     model = relationship("Model", back_populates="model_links")
     node = relationship("Node", back_populates="model_links")

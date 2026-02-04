@@ -9,7 +9,7 @@ class SenateStoryweaver(SenateBase):
     """
 
     def __init__(self, llm_actor):
-        super().__init__(llm_actor, "Storyweaver")
+        super().__init__("Storyweaver", llm_actor)
 
     def propose(
         self,
@@ -22,6 +22,7 @@ class SenateStoryweaver(SenateBase):
         voiceprint,
         metadata,
         telemetry,
+        routing=None,
     ):
         llm_proposal = self.llm_actor.propose(
             context=context,
@@ -33,6 +34,7 @@ class SenateStoryweaver(SenateBase):
             voiceprint=voiceprint,
             metadata=metadata,
             telemetry=telemetry,
+            routing=routing,
         )
 
         llm_proposal["actor"] = "Storyweaver"

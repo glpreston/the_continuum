@@ -6,7 +6,7 @@ class Analyst(BaseLLMActor):
     def __init__(self, controller):
         super().__init__(
             name="Analyst",
-            prompt_file="analyst.txt",
+            prompt_file="analyst_prompt.txt",
             persona="analyst",
             system_prompt="You are the Analyst.",
             temperature=0.7,
@@ -28,6 +28,7 @@ class Analyst(BaseLLMActor):
         voiceprint,
         metadata,
         telemetry,
+        routing=None,
     ):
         """
         Phase‑5 propose(): delegates to BaseLLMActor.propose()
@@ -43,4 +44,5 @@ class Analyst(BaseLLMActor):
             voiceprint=voiceprint,
             metadata=metadata,
             telemetry=telemetry,
+            routing=routing,
         )

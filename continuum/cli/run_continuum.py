@@ -1,3 +1,4 @@
+#continuum/cli/run_continuum.py
 """
 Command‑line interface for The Continuum.
 Provides a simple interactive loop for testing the orchestrator.

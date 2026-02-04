@@ -9,6 +9,7 @@ from continuum.actors.architect import Architect
 from continuum.actors.analyst import Analyst
 from continuum.actors.storyweaver import Storyweaver
 from continuum.actors.synthesizer import Synthesizer
+from continuum.actors.greeter import Greeter
 
 # Senate wrappers
 from continuum.actors.senate_architect import SenateArchitect
@@ -16,7 +17,7 @@ from continuum.actors.senate_analyst import SenateAnalyst
 from continuum.actors.senate_storyweaver import SenateStoryweaver
 from continuum.actors.senate_synthesizer import SenateSynthesizer
 from continuum.orchestrator.senate import Senate
-
+from continuum.actors.senate_greeter import SenateGreeter
 
 def initialize_actors_and_senate(controller):
     """
@@ -36,12 +37,13 @@ def initialize_actors_and_senate(controller):
     analyst = Analyst(controller)
     storyweaver = Storyweaver(controller)
     synthesizer = Synthesizer(controller)
-
+    greeter = Greeter(controller)   
     controller.actors = {
         "Architect": architect,
         "Analyst": analyst,
         "Storyweaver": storyweaver,
         "Synthesizer": synthesizer,
+        "Greeter": greeter, 
     }
 
     log_debug("[ACTORS] LLM actors instantiated", phase="actors")
@@ -53,12 +55,13 @@ def initialize_actors_and_senate(controller):
     senate_analyst = SenateAnalyst(analyst)
     senate_storyweaver = SenateStoryweaver(storyweaver)
     senate_synthesizer = SenateSynthesizer(synthesizer)
-
+    senate_greeter = SenateGreeter(greeter) 
     controller.senate_actors = {
         "Architect": senate_architect,
         "Analyst": senate_analyst,
         "Storyweaver": senate_storyweaver,
         "Synthesizer": senate_synthesizer,
+        "Greeter": senate_greeter,      
     }
 
     log_debug("[ACTORS] Senate wrappers instantiated", phase="actors")
@@ -72,6 +75,7 @@ def initialize_actors_and_senate(controller):
         senate_analyst,
         senate_storyweaver,
         senate_synthesizer,
+        senate_greeter, 
     ]
 
     controller.senate_members = senate_members
@@ -101,6 +105,7 @@ def initialize_actors_and_senate(controller):
         "Analyst": {"enabled": True},
         "Storyweaver": {"enabled": True},
         "Synthesizer": {"enabled": True},
+        "Greeter": {"enabled": True},
     }
 
     log_debug("[ACTORS] Actor settings initialized", phase="actors")

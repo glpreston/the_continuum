@@ -1,107 +1,194 @@
-#continuum/orchestrator/nodeselector_v2.py
+# orchestrator/router/node_selector_v2.py
 
-import random
+from dataclasses import dataclass
+from typing import Any, Callable, Dict, List, Optional
 from sqlalchemy import text
+from sqlalchemy.orm import Session, sessionmaker
+import random
+
+
+LoggerCallable = Callable[[str], None]
+
+
+@dataclass
+class NodeRecord:
+    id: int
+    name: str
+    host: str
+    health_score: float
+    quarantined: bool
+    available_memory_gb: float
 
 
 class NodeSelectorV2:
+    """
+    Phase‑5 Node Selector (health‑aware, memory‑aware, reality‑aware).
 
-    def __init__(self, db, logger=None):
+    Responsibilities:
+      - Fetch nodes hosting a given model (from model_nodes)
+      - Join with models + nodes + node_health
+      - Filter out nodes that cannot load the model (memory)
+      - Filter out quarantined nodes
+      - Weighted lottery based on health_score
+      - Provide alternates sorted by health_score
+    """
+
+    def __init__(self, db: Any, logger: Optional[LoggerCallable] = None):
         self.db = db
-        self.logger = logger or (lambda *args, **kwargs: None)
+        self.logger = logger
 
-    # -----------------------------------
-    # Fetch nodes hosting the model
-    # -----------------------------------
+    # ---------------------------------------------------------
+    # Helpers
+    # ---------------------------------------------------------
+    def _get_session(self) -> Session:
+        if isinstance(self.db, Session):
+            return self.db
+        if isinstance(self.db, sessionmaker):
+            return self.db()
+        if callable(self.db):
+            return self.db()
+        raise TypeError("db must be a Session, sessionmaker, or callable returning a Session")
 
-    def fetch_model_nodes(self, model_name):
-        rows = self.db.execute(
-            text("""
-                SELECT
-                    n.id,
-                    n.name,
-                    n.type,
-                    n.host,
-                    n.provider,
-                    n.api_key_env,
-                    n.enabled,
-                    n.status,
-                    nh.latency_ms,
-                    nh.status AS health_status
-                FROM model_nodes mn
-                JOIN nodes n ON mn.node_id = n.id
-                LEFT JOIN node_health nh ON nh.node_id = n.id
-                WHERE mn.model_name = :model_name
-            """),
-            {"model_name": model_name}
-        ).mappings().all()
+    def _log(self, msg: str):
+        if self.logger:
+            try:
+                self.logger("info", msg)
+            except Exception:
+                pass
+        else:
+            print(msg)
 
-        # Convert SQLAlchemy RowMapping → dict
-        return [dict(r) for r in rows]
+    # ---------------------------------------------------------
+    # Fetch nodes + health + memory
+    # ---------------------------------------------------------
+    def fetch_model_nodes(self, model_name: str) -> List[NodeRecord]:
+        """
+        Uses your actual schema:
+        model_nodes(model_id, node_id)
+        models(id, name, required_memory_gb)
+        nodes(id, name, host, available_memory_gb)
+        node_health(node_id, health_score, quarantined)
+        """
 
-    # -----------------------------------
-    # Compute health score
-    # -----------------------------------
-    def compute_health(self, node):
-        if not node["enabled"]:
-            return 0.0
+        session = self._get_session()
 
-        status_score = 1.0 if node["status"] == "healthy" else 0.3
-        latency_score = 1.0 / (1.0 + (node["latency_ms"] or 200))
-        health_status_score = 1.0 if node["health_status"] == "ok" else 0.5
+        rows = (
+            session.execute(
+                text(
+                    """
+                    SELECT
+                        n.id,
+                        n.name,
+                        n.host,
+                        n.available_memory_gb,
+                        nh.health_score,
+                        nh.quarantined,
+                        m.required_memory_gb
 
-        return (0.5 * status_score) + (0.3 * latency_score) + (0.2 * health_status_score)
+                    FROM model_nodes mn
+                    JOIN models m ON m.id = mn.model_id
+                    JOIN nodes n ON n.id = mn.node_id
+                    LEFT JOIN node_health nh ON nh.node_id = n.id
 
-    # -----------------------------------
+                    WHERE m.name = :model_name
+                    """
+                ),
+                {"model_name": model_name},
+            )
+            .mappings()
+            .all()
+        )
+
+        nodes = []
+        for row in rows:
+            nodes.append(
+                NodeRecord(
+                    id=row["id"],
+                    name=row["name"],
+                    host=row["host"],
+                    health_score=row["health_score"] if row["health_score"] is not None else 1.0,
+                    quarantined=bool(row["quarantined"]) if row["quarantined"] is not None else False,
+                    available_memory_gb=row["available_memory_gb"] or 0.0,
+                )
+            )
+
+        self._log(f"[NodeSelectorV2] Found {len(nodes)} nodes for model '{model_name}'")
+        return nodes
+
+    # ---------------------------------------------------------
     # Weighted lottery
-    # -----------------------------------
-    def weighted_choice(self, nodes):
-        weights = [n["health_score"] for n in nodes]
-        total = sum(weights)
-        if total == 0:
-            return None
-        normalized = [w / total for w in weights]
-        return random.choices(nodes, weights=normalized, k=1)[0]
+    # ---------------------------------------------------------
+    def _weighted_lottery(self, nodes: List[NodeRecord]) -> NodeRecord:
+        total = sum(n.health_score for n in nodes)
+        if total <= 0:
+            return max(nodes, key=lambda n: n.health_score)
 
-    # -----------------------------------
-    # Main selection function
-    # -----------------------------------
-    def select_node(self, model_name):
+        r = random.uniform(0, total)
+        cumulative = 0.0
+
+        for node in nodes:
+            cumulative += node.health_score
+            if r <= cumulative:
+                return node
+
+        return nodes[-1]
+
+    # ---------------------------------------------------------
+    # Main selection logic
+    # ---------------------------------------------------------
+    def select_node(self, model_name: str, required_memory_gb: float) -> Dict[str, Any]:
         nodes = self.fetch_model_nodes(model_name)
 
         if not nodes:
-            raise RuntimeError(f"No nodes host model '{model_name}'")
+            self._log(f"[NodeSelectorV2] No nodes found for model '{model_name}'")
+            return {"selected_node": None, "candidate_nodes": []}
 
-        # Compute health scores
-        for n in nodes:
-            n.setdefault("enabled", True)
-            n.setdefault("latency_ms", 200)
-            n.setdefault("health_status", "ok")
-            n["health_score"] = self.compute_health(n)
+        # 1. Filter out nodes that cannot load the model
+        nodes = [
+            n for n in nodes
+            if n.available_memory_gb >= required_memory_gb
+        ]
 
-        # Filter healthy nodes
-        healthy = [n for n in nodes if n["health_score"] > 0.3]
+        if not nodes:
+            self._log(
+                f"[NodeSelectorV2] No nodes have enough memory for model '{model_name}' "
+                f"(required={required_memory_gb} GB)"
+            )
+            return {"selected_node": None, "candidate_nodes": []}
 
-        # Weighted lottery
-        selected = self.weighted_choice(healthy) if healthy else None
+        # 2. Filter out quarantined nodes
+        healthy_nodes = [n for n in nodes if not n.quarantined]
 
-        # Fallback: choose least-bad node
-        if not selected:
-            nodes_sorted = sorted(nodes, key=lambda x: x["health_score"], reverse=True)
-            selected = nodes_sorted[0]
+        if not healthy_nodes:
+            fallback = max(nodes, key=lambda n: n.health_score)
+            self._log(
+                f"[NodeSelectorV2] All nodes quarantined for model '{model_name}', "
+                f"fallback={fallback.id}"
+            )
+            return {
+                "selected_node": fallback.__dict__,
+                "candidate_nodes": [n.__dict__ for n in nodes],
+            }
 
-        # Build alternates list
+        # 3. Weighted lottery
+        selected = self._weighted_lottery(healthy_nodes)
+
+        # 4. Alternates
         alternates = sorted(
-            [n for n in nodes if n["id"] != selected["id"]],
-            key=lambda x: x["health_score"],
-            reverse=True
+            [n for n in healthy_nodes if n.id != selected.id],
+            key=lambda n: n.health_score,
+            reverse=True,
         )
 
-        result = {
-            "model": model_name,
-            "selected_node": selected,
-            "alternates": alternates
-        }
+        self._log(
+            f"[NodeSelectorV2] Selected node {selected.id} "
+            f"('{selected.name}' @ {selected.host}) "
+            f"score={selected.health_score:.3f}"
+        )
 
-        self.logger("info", f"NodeSelector v2 result: {result}")
-        return result
+        return {
+            "selected_node": selected.__dict__,
+            "candidate_nodes": [n.__dict__ for n in healthy_nodes],
+            "available_nodes": [n.__dict__ for n in healthy_nodes],   # ⭐ NEW
+            "alternates": [n.__dict__ for n in alternates],
+        }    

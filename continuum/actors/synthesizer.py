@@ -6,7 +6,7 @@ class Synthesizer(BaseLLMActor):
     def __init__(self, controller):
         super().__init__(
             name="Synthesizer",
-            prompt_file="synthesizer.txt",
+            prompt_file="synthesizer_prompt.txt",
             persona="synthesizer",
             system_prompt="You are the Synthesizer.",
             temperature=0.7,
@@ -28,6 +28,7 @@ class Synthesizer(BaseLLMActor):
         voiceprint,
         metadata,
         telemetry,
+        routing=None,   
     ):
         """
         Phase‑5 propose(): delegates to BaseLLMActor.propose()
@@ -43,4 +44,5 @@ class Synthesizer(BaseLLMActor):
             voiceprint=voiceprint,
             metadata=metadata,
             telemetry=telemetry,
+            routing=routing,
         )

@@ -9,7 +9,7 @@ class SenateSynthesizer(SenateBase):
     """
 
     def __init__(self, llm_actor):
-        super().__init__(llm_actor, "Synthesizer")
+        super().__init__("Synthesizer", llm_actor)
 
     def propose(
         self,
@@ -22,6 +22,7 @@ class SenateSynthesizer(SenateBase):
         voiceprint,
         metadata,
         telemetry,
+        routing=None,
     ):
         llm_proposal = self.llm_actor.propose(
             context=context,
@@ -33,8 +34,8 @@ class SenateSynthesizer(SenateBase):
             voiceprint=voiceprint,
             metadata=metadata,
             telemetry=telemetry,
+            routing=routing,
         )
-
         llm_proposal["actor"] = "Synthesizer"
         llm_proposal.setdefault("metadata", {})["senate_actor"] = True
         return llm_proposal

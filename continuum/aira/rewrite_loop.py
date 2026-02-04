@@ -13,8 +13,7 @@ from continuum.aira.safety import (
 def rewrite_loop(
     llm_client,
     model: str,
-    endpoint: str,
-    base_text: str,
+    base_text,
     memory_summary: str,
     emotion_label: str,
     base_temperature: float,
@@ -22,35 +21,29 @@ def rewrite_loop(
     max_rewrite_depth: int = 3,
     early_stop_threshold: float = 0.92,
 ):
-    """
-    Perform Aira's full multi-pass rewrite loop (Router-aware).
+    # ⭐ Normalize base_text BEFORE ANYTHING ELSE
+    if not isinstance(base_text, str):
+        base_text = str(base_text) if base_text is not None else ""
 
-    Responsibilities:
-    - Run multiple rewrite passes
-    - Apply diminishing temperature curve
-    - Stop early if diff is small
-    - Clamp runaway length
-    - Log diffs for debugging/UI
-    """
-
-    if not isinstance(base_text, str) or not base_text.strip():
+    # ⭐ Now safe to check emptiness
+    if not base_text.strip():
         log_error("[AIRA] rewrite_loop received empty base_text")
         return base_text
 
+    # ⭐ Now safe to call len()
     log_debug(
         f"[AIRA] Starting rewrite loop: depth={max_rewrite_depth}, "
-        f"model={model}, endpoint={endpoint}, base_len={len(base_text)}"
+        f"model={model}, base_len={len(base_text)}"
     )
-
+    
     current_text = base_text
 
     for pass_index in range(max_rewrite_depth):
-        log_debug(f"[AIRA] ---- Rewrite pass {pass_index} ----")
+        log_debug(f"[AIRA] Rewrite pass {pass_index + 1}/{max_rewrite_depth}")
 
         rewritten = rewrite_pass(
             llm_client=llm_client,
             model=model,
-            endpoint=endpoint,
             text_to_rewrite=current_text,
             memory_summary=memory_summary,
             emotion_label=emotion_label,
@@ -59,30 +52,24 @@ def rewrite_loop(
             pass_index=pass_index,
         )
 
-        if not rewritten:
-            log_error(f"[AIRA] Rewrite pass {pass_index} returned None, stopping early")
+        if not isinstance(rewritten, str) or not rewritten.strip():
+            log_error("[AIRA] rewrite_pass returned empty or invalid text, stopping early")
             break
 
-        # Safety: clamp runaway length
-        if is_excessively_long(current_text, rewritten):
-            log_error("[AIRA] Rewrite grew excessively long, clamping")
-            rewritten = clamp_length(rewritten, max_length=len(current_text) * 2)
+        # Clamp runaway length
+        if is_excessively_long(rewritten, max_tokens):
+            log_debug("[AIRA] Rewritten text excessively long, clamping")
+            rewritten = clamp_length(rewritten, max_tokens)
 
-        # Compute diff for logging and early stopping
-        diff_text = compute_diff(current_text, rewritten)
-        log_debug(f"[AIRA] Diff for pass {pass_index}:\n{diff_text}")
+        # Compute diff and decide whether to stop early
+        diff_score = compute_diff(current_text, rewritten)
+        log_debug(f"[AIRA] Diff score after pass {pass_index + 1}: {diff_score:.4f}")
 
-        # Early stop if rewrite changed very little
-        if should_stop_early(current_text, rewritten, threshold=early_stop_threshold):
-            log_debug(f"[AIRA] Early stop triggered at pass {pass_index}")
+        if should_stop_early(diff_score, early_stop_threshold):
+            log_debug("[AIRA] Early stop triggered by diff threshold")
             current_text = rewritten
             break
 
         current_text = rewritten
-
-    log_debug(
-        f"[AIRA] Rewrite loop complete. Final length={len(current_text)}, "
-        f"original_length={len(base_text)}"
-    )
 
     return current_text

@@ -4,6 +4,7 @@ from typing import Optional
 from continuum.core.logger import log_debug, log_error
 from continuum.aira.prompt import build_prompt
 
+
 def _apply_temperature_curve(
     base_temperature: float,
     pass_index: int,
@@ -28,7 +29,6 @@ def _apply_temperature_curve(
 def rewrite_pass(
     llm_client,
     model: str,
-    endpoint: str,
     text_to_rewrite: str,
     memory_summary: str,
     emotion_label: str,
@@ -37,11 +37,11 @@ def rewrite_pass(
     pass_index: int,
 ) -> Optional[str]:
     """
-    Perform a single Aira rewrite pass (Router-aware).
+    Perform a single Aira rewrite pass (model-aware, endpoint-agnostic).
 
     - Builds the prompt using Aira's voice template.
     - Applies a diminishing temperature curve based on pass_index.
-    - Calls the LLM client on the SAME endpoint as main generation.
+    - Calls the LLM client using its current/default endpoint.
     - Returns the rewritten text or None on failure.
     """
 
@@ -60,36 +60,24 @@ def rewrite_pass(
         pass_index=pass_index,
     )
 
-    log_debug(
-        f"[AIRA] Starting rewrite pass {pass_index} "
-        f"with model={model}, endpoint={endpoint}, "
-        f"temperature={temperature:.4f}, max_tokens={max_tokens}"
-    )
-
     try:
-        rewritten = llm_client.generate(
+        response = llm_client.generate(
             prompt=prompt,
             model=model,
             temperature=temperature,
             max_tokens=max_tokens,
-            endpoint=endpoint,
         )
-
-        if not rewritten:
-            log_error(f"[AIRA] Empty response from LLM on pass {pass_index}")
-            return None
-
-        rewritten_str = rewritten.strip()
-        if not rewritten_str:
-            log_error(f"[AIRA] Whitespace-only response from LLM on pass {pass_index}")
-            return None
-
-        log_debug(
-            f"[AIRA] Completed rewrite pass {pass_index}, "
-            f"original_len={len(text_to_rewrite)}, rewritten_len={len(rewritten_str)}"
-        )
-        return rewritten_str
-
     except Exception as e:
-        log_error(f"[AIRA] Error during rewrite pass {pass_index}: {e}")
+        log_error(f"[AIRA] rewrite_pass LLM error: {e}")
         return None
+
+    if isinstance(response, dict):
+        text = response.get("text")
+    else:
+        text = str(response) if response is not None else None
+
+    if not text or not str(text).strip():
+        log_error("[AIRA] rewrite_pass received empty response from LLM")
+        return None
+
+    return text

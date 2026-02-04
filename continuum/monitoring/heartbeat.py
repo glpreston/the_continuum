@@ -8,6 +8,19 @@ from continuum.db.sqlalchemy_connection import get_db_session
 from continuum.db.models.nodes import Node, NodeStatus
 from continuum.db.models.node_health import NodeHealth
 
+# NEW: imports for degraded-node refresh
+from continuum.config.model_search import refresh_node
+from continuum.db.mysql_connection import db_pool
+
+
+def handle_degraded_node(node):
+    """Trigger a model refresh when a node becomes degraded."""
+    try:
+        print(f"[ModelSync] Node {node.host} degraded — triggering model refresh")
+        refresh_node(node_id=node.id, endpoint=node.host, db_pool=db_pool)
+    except Exception as e:
+        print(f"[ModelSync] Failed degraded-node refresh: {e}")
+
 
 def heartbeat_loop(interval_seconds: int = 10):
     """
@@ -26,7 +39,7 @@ def heartbeat_loop(interval_seconds: int = 10):
 
             try:
                 # Ping the node's health endpoint
-                url = f"http://{node.host}/health"
+                url = f"http://{node.host}/api/tags"
                 r = requests.get(url, timeout=2)
 
                 latency = int((time.time() - start) * 1000)
@@ -35,6 +48,22 @@ def heartbeat_loop(interval_seconds: int = 10):
             except Exception:
                 latency = None
                 status = NodeStatus.offline
+
+            # Compute a simple health score
+            if status == NodeStatus.offline:
+                health_score = 0.0
+            elif latency is None:
+                health_score = 0.2
+            elif latency > 1000:
+                health_score = 0.3
+            elif latency > 500:
+                health_score = 0.5
+            else:
+                health_score = 1.0
+
+            # Trigger degraded-node refresh
+            if health_score < 0.5:
+                handle_degraded_node(node)
 
             # Write a health record
             record = NodeHealth(

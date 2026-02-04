@@ -9,7 +9,7 @@ class SenateAnalyst(SenateBase):
     """
 
     def __init__(self, llm_actor):
-        super().__init__(llm_actor, "Analyst")
+        super().__init__("Analyst", llm_actor)
 
     def propose(
         self,
@@ -22,6 +22,7 @@ class SenateAnalyst(SenateBase):
         voiceprint,
         metadata,
         telemetry,
+        routing=None,
     ):
         llm_proposal = self.llm_actor.propose(
             context=context,
@@ -33,6 +34,7 @@ class SenateAnalyst(SenateBase):
             voiceprint=voiceprint,
             metadata=metadata,
             telemetry=telemetry,
+            routing=routing,
         )
 
         llm_proposal["actor"] = "Analyst"

@@ -6,7 +6,7 @@ class Storyweaver(BaseLLMActor):
     def __init__(self, controller):
         super().__init__(
             name="Storyweaver",
-            prompt_file="storyweaver.txt",
+            prompt_file="storyweaver_prompt.txt",
             persona="storyweaver",
             system_prompt="You are the Storyweaver.",
             temperature=0.7,
@@ -28,6 +28,7 @@ class Storyweaver(BaseLLMActor):
         voiceprint,
         metadata,
         telemetry,
+        routing=None,
     ):
         """
         Phase‑5 propose(): delegates to BaseLLMActor.propose()
@@ -43,4 +44,5 @@ class Storyweaver(BaseLLMActor):
             voiceprint=voiceprint,
             metadata=metadata,
             telemetry=telemetry,
+            routing=routing,
         )

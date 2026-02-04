@@ -20,11 +20,12 @@ class LLMClient:
 
     This client simply executes the request.
     """
-
+      
     def __init__(self, default_endpoint="http://localhost:11434/api/generate"):
         self.default_endpoint = default_endpoint
-        self.endpoint = default_endpoint   # ⭐ ADD THIS
-        
+        self.endpoint = default_endpoint
+        self.warm_cache = {}   # ⭐ (endpoint, model) → warmed?
+
     # ---------------------------------------------------------
     # Main LLM call
     # ---------------------------------------------------------
@@ -36,21 +37,10 @@ class LLMClient:
         max_tokens: int = 512,
         endpoint: str = None,
     ):
-        """
-        Execute an LLM request.
-
-        Args:
-            prompt: final prompt string
-            model: model name chosen by Router
-            temperature: sampling temperature
-            max_tokens: max tokens to generate
-            endpoint: node endpoint chosen by Router
-
-        Returns:
-            full_text: the streamed LLM output
-        """
-
         endpoint = endpoint or self.default_endpoint
+
+        # ⭐ Warm the model on this node
+        self.warm_model(model, endpoint)
 
         payload = {
             "model": model,
@@ -71,11 +61,9 @@ class LLMClient:
 
         full_text = ""
 
-        # Ollama streams NDJSON — one JSON object per line
         for line in response.iter_lines():
             if not line:
                 continue
-
             try:
                 obj = json.loads(line.decode("utf-8"))
             except Exception:
@@ -88,3 +76,25 @@ class LLMClient:
                 break
 
         return full_text
+
+    
+    def warm_model(self, model, endpoint):
+        key = (endpoint, model)
+
+        # Already warm?
+        if key in self.warm_cache:
+            return
+
+        # Warm-up request (very cheap)
+        payload = {
+            "model": model,
+            "prompt": "warmup",
+            "options": {"num_predict": 1}
+        }
+
+        try:
+            requests.post(endpoint, json=payload, timeout=2)
+        except Exception:
+            pass  # Warm-up failures shouldn't block anything
+
+        self.warm_cache[key] = True    

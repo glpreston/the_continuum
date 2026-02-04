@@ -1,56 +1,82 @@
+# -------------------------
 # Python
+# -------------------------
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
 *.egg-info/
-*.egg
+.eggs/
 build/
 dist/
-.venv/
-env/
-venv/
+pip-wheel-metadata/
 
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# -------------------------
 # Streamlit
+# -------------------------
 .streamlit/cache/
 .streamlit/state/
+.streamlit/logs/
 
-# Coqui TTS (legacy protection)
-coqui_models/
-tts_models/
-tts_cache/
+# -------------------------
+# Coverage
+# -------------------------
+htmlcov/
+.coverage
+coverage.xml
 
-# Transformers / HuggingFace
-transformers_cache/
-huggingface/
-hf_cache/
-
-
-# Node
+# -------------------------
+# Node / Frontend
+# -------------------------
 node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
 
+# -------------------------
 # Logs
+# -------------------------
 *.log
 logs/
 
+# -------------------------
 # Editor settings
+# -------------------------
 .vscode/
 
+# -------------------------
 # Environment files
+# -------------------------
 .env
 .env.local
 
+# -------------------------
 # OS junk
+# -------------------------
 .DS_Store
 Thumbs.db
 desktop.ini
 
+# -------------------------
 # Local secrets
+# -------------------------
 secrets/
 
-# dataabase connections
-sqlalchemy_connection.py
+# -------------------------
+# Archive folder
+# -------------------------
+continuum/archive/
 
-[user]
-    name = glpreston
-    email = georgezpreston@gmail.com
+# -------------------------
+# Local DB / SQLite (if any)
+# -------------------------
+*.sqlite3
+*.db
+*.db-shm
+*.db-wal

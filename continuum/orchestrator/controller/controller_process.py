@@ -1,34 +1,29 @@
 # continuum/orchestrator/controller_process.py
 # Modernized message‑processing pipeline for ContinuumController
 
+import time
 from continuum.core.logger import log_debug, log_error
+from continuum.db.models.cognitive_trace import CognitiveTrace
+from continuum.orchestrator.controller.intent_routing import INTENT_TO_ACTORS
 
 
 def process_message(controller, message: str) -> str:
     """
     Full processing pipeline for a single user message.
-    Now Router‑aware.
-
-    Handles:
-      - Emotion detection
-      - Emotional state update
-      - Senate → Jury deliberation
-      - Fusion 2.0
-      - Meta‑Persona rewrite
-      - Emotional arc recording
-      - Turn logging
+    Now Router‑aware + cognitively traced.
     """
 
     log_error("🔥 ENTERED controller_process.process_message() 🔥", phase="controller")
 
-    # ---------------------------------------------------------
+    t_total_start = time.perf_counter()
+    timings = {}
+
     # 0. Add user message to context
-    # ---------------------------------------------------------
     controller.context.add_user_message(message)
 
-    # ---------------------------------------------------------
     # 1. Emotion detection
-    # ---------------------------------------------------------
+    t_emotion_start = time.perf_counter()
+
     raw_state, dominant_emotion, intensity = controller.emotion_detector.detect(message)
     log_debug(f"[PROCESS] Emotion detected: {dominant_emotion} ({intensity})", phase="emotion")
 
@@ -43,51 +38,152 @@ def process_message(controller, message: str) -> str:
         raw_state,
     )
 
-    # ---------------------------------------------------------
-    # 2. Senate → Jury deliberation
-    #    (Router-aware: routing info available on controller)
-    # ---------------------------------------------------------
-    log_error("🔥 CALLING DELIBERATION ENGINE 🔥", phase="delib")
+    timings["emotion_time"] = time.perf_counter() - t_emotion_start
 
+    # 2. Restore routing info (for fusion / rewrite / trace)
     routing = controller.last_routing_decision or {}
-    intent = routing.get("intent")
     model_choice = routing.get("model_selection", {})
     node_choice = routing.get("node_selection", {})
 
+    # 3. Intent classification → actors_to_run
+    intent = controller.classify_intent(message)
+    actors_to_run = INTENT_TO_ACTORS.get(intent, ["Architect"])
 
+    # ⭐ FAST‑PATH: Skip Senate/Jury for Greeter greetings & chitchat
+    if intent in ("greeting", "chitchat") and "Greeter" in actors_to_run:
+        log_error("⚡ FAST‑PATH: Bypassing Senate/Jury for Greeter", phase="fastpath")
+
+        greeter_actor = controller.actors.get("Greeter")
+
+        if greeter_actor:
+            t_greeter_start = time.perf_counter()
+
+            # Match BaseLLMActor.propose signature, but do NOT depend on controller.telemetry
+            proposal = greeter_actor.propose(
+                controller=controller,
+                message=message,
+                context=controller.context,
+                emotional_state=controller.emotional_state,
+                emotional_memory=controller.emotional_memory,
+                memory=controller.memory,
+                voiceprint=getattr(controller, "voiceprint", None),
+                metadata={},
+                telemetry=None,
+            )
+
+            greeter_time = time.perf_counter() - t_greeter_start
+            timings["deliberation_time"] = greeter_time
+
+            final_text = proposal.get("content") if isinstance(proposal, dict) else str(proposal)
+        else:
+            final_text = "Hello! (Greeter actor missing)"
+            timings["deliberation_time"] = 0.0
+
+        # Rewrite through Aira
+        log_error("🔥 CALLING META‑PERSONA REWRITE (FAST‑PATH) 🔥", phase="meta")
+        t_rewrite_start = time.perf_counter()
+        rewritten = controller.meta_rewrite_llm(
+            core_text=final_text,
+            emotion_label=dominant_emotion,
+            routing=routing,
+            intent_name=intent,
+            actor_name="Greeter",
+            persona_name="Aira_Lite" if intent in ("greeting", "chitchat") else "Aira",
+        )
+        timings["rewrite_time"] = time.perf_counter() - t_rewrite_start
+
+        controller.context.add_assistant_message(rewritten)
+
+        # Build minimal trace (no fusion, no full Senate)
+        total_time = time.perf_counter() - t_total_start
+        timings["total_time"] = total_time
+        timings["fusion_adjust_time"] = 0.0
+        timings["fusion_run_time"] = 0.0
+
+        controller.last_trace = {
+            "timings": timings,
+            "routing": routing,
+            "ranked_proposals": [],
+            "final_proposal": {"actor": "Greeter", "content": final_text},
+            "fusion_output": final_text,
+            "rewritten_output": rewritten,
+            "emotion": {
+                "dominant": dominant_emotion,
+                "intensity": intensity,
+            },
+            "actor_timings": None,
+        }
+
+        return rewritten
+
+
+    log_error(f"[INTENT] Classified as: {intent}", phase="intent")
+    log_error(f"[INTENT] Actors to run: {actors_to_run}", phase="intent")
+
+
+
+    # 4. Senate → Jury deliberation
+    log_error("🔥 CALLING DELIBERATION ENGINE 🔥", phase="delib")
+
+    t_delib_start = time.perf_counter()
     ranked, final_proposal = controller.deliberation_engine.run(
         controller=controller,
         context=controller.context,
         message=message,
         emotional_state=controller.emotional_state,
         emotional_memory=controller.emotional_memory,
+        actors_to_run=actors_to_run,
     )
+    timings["deliberation_time"] = time.perf_counter() - t_delib_start
 
     log_debug(f"[PROCESS] Final proposal from Jury: {final_proposal}", phase="delib")
 
-    # ---------------------------------------------------------
-    # 3. Fusion adjust
-    # ---------------------------------------------------------
+    # 🔴 Guard if Senate/Jury produced nothing
+    if not ranked:
+        total_time = time.perf_counter() - t_total_start
+        timings["total_time"] = total_time
+
+        actor_timings = getattr(controller, "last_trace", {}).get("actor_timings")
+
+        controller.last_trace = {
+            "timings": timings,
+            "routing": routing,
+            "ranked_proposals": ranked,
+            "final_proposal": final_proposal,
+            "fusion_output": None,
+            "rewritten_output": None,
+            "emotion": {
+                "dominant": dominant_emotion,
+                "intensity": intensity,
+            },
+            "actor_timings": actor_timings,
+        }
+
+        return "The Continuum encountered an internal issue: no proposals were generated by the actors/Senate for this request."
+
+    # 5. Fusion adjust
     log_error("🔥 CALLING FUSION ADJUST 🔥", phase="fusion")
 
+    t_fusion_adjust_start = time.perf_counter()
     fusion_weights = controller.fusion_pipeline.adjust(final_proposal)
+    timings["fusion_adjust_time"] = time.perf_counter() - t_fusion_adjust_start
+
     log_debug(f"[PROCESS] Fusion weights: {fusion_weights}", phase="fusion")
 
-    # ---------------------------------------------------------
-    # 4. Fusion run
-    # ---------------------------------------------------------
+    # 6. Fusion run
     log_error("🔥 CALLING FUSION RUN 🔥", phase="fusion")
 
+    t_fusion_run_start = time.perf_counter()
     final_text = controller.fusion_pipeline.run(
         fusion_weights=fusion_weights,
         ranked_proposals=ranked,
         controller=controller,
-        routing=routing,            # ⭐ NEW: routing available to Fusion
+        routing=routing,
     )
+    timings["fusion_run_time"] = time.perf_counter() - t_fusion_run_start
 
     log_debug(f"[PROCESS] Final text before rewrite: {final_text}", phase="fusion")
 
-    # Store the fused output as the final proposal
     controller.last_final_proposal = {
         "actor": "FusionEngine",
         "content": final_text,
@@ -95,42 +191,109 @@ def process_message(controller, message: str) -> str:
             "source": "max_hybrid_fusion",
             "fusion_weights": fusion_weights,
             "jury_proposal": final_proposal,
-            "routing": routing,     # ⭐ NEW: store routing in metadata
+            "routing": routing,
         },
     }
 
-    # ---------------------------------------------------------
-    # 5. Meta‑Persona rewrite
-    # ---------------------------------------------------------
+    # Determine the primary actor for rewrite context (for Aira tone modulation)
+    jury_winner = final_proposal.get("actor") if isinstance(final_proposal, dict) else None
+    primary_actor = jury_winner or (actors_to_run[0] if actors_to_run else None)
+
+    # 7. Meta‑Persona rewrite
     log_error("🔥 CALLING META‑PERSONA REWRITE 🔥", phase="meta")
 
+    t_rewrite_start = time.perf_counter()
     rewritten = controller.meta_rewrite_llm(
         core_text=final_text,
         emotion_label=dominant_emotion,
-        routing=routing,            # ⭐ NEW: routing available to rewrite layer
+        routing=routing,
+        intent_name=intent,       # pass intent to Aira
+        actor_name=primary_actor, # pass actor (e.g., Greeter) to Aira
+        persona_name="Aira_Lite" if intent in ("greeting", "chitchat") else "Aira",
     )
+    timings["rewrite_time"] = time.perf_counter() - t_rewrite_start
 
     log_debug(f"[PROCESS] Rewritten output: {rewritten}", phase="meta")
     controller.context.add_assistant_message(rewritten)
 
-    # ---------------------------------------------------------
-    # 6. Emotional arc recording
-    # ---------------------------------------------------------
+    # 8. Emotional arc recording
     controller.arc_pipeline.record(
         emotional_state=controller.emotional_state,
         dominant_emotion=dominant_emotion,
         fusion_weights=fusion_weights,
     )
     log_debug("[PROCESS] Emotional arc snapshot recorded", phase="emotion_arc")
-    
-    # ---------------------------------------------------------
-    # 7. Turn logging
-    # ---------------------------------------------------------
+
+    # 9. Turn logging
     controller.turn_logger.append({
         "message": final_text,
         "emotion": controller.emotional_state,
         "proposals": ranked,
-        "routing": routing,         # ⭐ NEW: routing logged for UI/debug
+        "routing": routing,
     })
+
+    # 10. Cognitive trace assembly + DB insert
+    total_time = time.perf_counter() - t_total_start
+    timings["total_time"] = total_time
+
+    model_name = model_choice.get("selected_model")
+    node_name = node_choice.get("selected_node", {}).get("name")
+
+    actor_confidence = final_proposal.get("confidence") if isinstance(final_proposal, dict) else None
+    actor_output = final_proposal.get("content") if isinstance(final_proposal, dict) else ""
+    actor_output_length = len(actor_output or "")
+
+    rewrite_delta = len(rewritten or "") - len(final_text or "")
+
+    senate_time = timings.get("deliberation_time")
+    jury_time = None
+    fusion_time = (
+        timings.get("fusion_adjust_time", 0.0) +
+        timings.get("fusion_run_time", 0.0)
+    )
+
+    record = CognitiveTrace(
+        actor_name=jury_winner,
+        model_name=model_name,
+        node_name=node_name,
+        routing_time=None,
+        actor_time=None,
+        senate_time=senate_time,
+        jury_time=jury_time,
+        fusion_time=fusion_time,
+        rewrite_time=timings.get("rewrite_time"),
+        total_time=total_time,
+        actor_confidence=actor_confidence,
+        actor_output_length=actor_output_length,
+        jury_winner=jury_winner,
+        jury_scores=None,
+        rewrite_delta=rewrite_delta,
+        error_flag=False,
+        error_message=None,
+    )
+
+    try:
+        controller.db.add(record)
+        controller.db.commit()
+    except Exception as e:
+        log_error(f"[TRACE] Failed to persist CognitiveTrace: {e}", phase="trace")
+        controller.db.rollback()
+
+    # Preserve actor_timings if Senate populated it
+    actor_timings = getattr(controller, "last_trace", {}).get("actor_timings")
+
+    controller.last_trace = {
+        "timings": timings,
+        "routing": routing,
+        "ranked_proposals": ranked,
+        "final_proposal": final_proposal,
+        "fusion_output": final_text,
+        "rewritten_output": rewritten,
+        "emotion": {
+            "dominant": dominant_emotion,
+            "intensity": intensity,
+        },
+        "actor_timings": actor_timings,
+    }
 
     return rewritten

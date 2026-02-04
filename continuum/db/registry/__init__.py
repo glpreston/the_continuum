@@ -1,11 +1,6 @@
 #continuum/db/registry/__init__.py
 from .base_registry import BaseRegistry
 from .routing import RoutingMixin
+from .model_registry import ModelRegistry
 
-class ModelRegistry(BaseRegistry, RoutingMixin):
-    """
-    Full registry composed of:
-    - BaseRegistry: loads nodes/models + lookup tables
-    - RoutingMixin: scoring + best-node selection
-    """
-    pass
+__all__ = ["BaseRegistry", "RoutingMixin", "ModelRegistry"]

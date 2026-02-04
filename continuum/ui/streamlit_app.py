@@ -1,217 +1,60 @@
-# continuum/ui/streamlit_app.py
-
+import time
+import os
 import streamlit as st
 from continuum.orchestrator.continuum_controller import ContinuumController
 
-# Panels
-from continuum.ui.panels.chat_panel import render_chat
-from continuum.ui.panels.actor_panel import render_actor_panel
-from continuum.ui.panels.memory_panel import render_memory
-from continuum.ui.panels.tools_panel import render_tools
-from continuum.ui.panels.persona_controls import render_persona_controls
-from continuum.ui.panels.reasoning_panel import render_reasoning
-from continuum.ui.panels.pipeline_panel import render_pipeline
-from continuum.ui.panels.flow_panel import render_flow
-from continuum.ui.panels.actor_profiles_panel import render_actor_profiles
-from continuum.ui.panels.actor_voiceprints_panel import render_actor_voiceprints
-from continuum.ui.panels.meta_persona import render_meta_persona_panel
-from continuum.ui.panels.emotional_memory_panel import render_emotional_memory
-from continuum.ui.panels.senate_debate_panel import render_senate_debate
-from continuum.ui.panels.traces_panel import render_traces
-from continuum.ui.panels.theme_panel import render_theme_controls
-from continuum.ui.panels.diagnostics_panel import render_diagnostics  # optional, if you still use it
-from continuum.ui.panels.turn_timeline_panel import render_turn_timeline
-from continuum.ui.panels.decision_breakdown_panel import render_decision_breakdown
-from continuum.ui.panels.decision_matrix_panel import render_decision_matrix
-from continuum.ui.panels.debug_diagnostics_panel import render_debug_diagnostics
-from continuum.ui.panels.meta_persona_debug_tab import render_meta_persona_debug_tab
-from continuum.ui.panels.emotioinal_arc_panel import render_emotional_arc_panel
 
+if "controller" not in st.session_state:
+    st.session_state.controller = ContinuumController()
 
-# ---------------------------------------------------------
-# Controller Builder
-# ---------------------------------------------------------
-def build_controller():
-    return ContinuumController()
+controller = st.session_state.controller
 
-
-# ---------------------------------------------------------
-# Main App
-# ---------------------------------------------------------
 def main():
     st.set_page_config(
-        page_title="The Continuum",
-        page_icon="∞",
-        layout="wide",
+        page_title="Aira",
+        layout="wide"
     )
 
-    # Session state initialization
-    if "controller" not in st.session_state:
-        st.session_state.controller = build_controller()
+    # Path to this script's directory
+    current_dir = os.path.dirname(__file__)
+    image_path = os.path.join(current_dir, "Aira.png")
 
-    controller = st.session_state.controller
+    st.image(image_path, width=100)
 
-    apply_theme(controller)
+    st.title("Aira")
 
-    # Title
-    st.title("The Continuum")
-    st.caption("Unified meta‑presence orchestrating internal actors")
+    # Initialize chat history
+    if "messages" not in st.session_state:
+        st.session_state.messages = []
 
-    # ---------------------------------------------------------
-    # SIDEBAR — Control Surface Only
-    # ---------------------------------------------------------
-    with st.sidebar:
-        st.header("Controls")
+    # Display existing messages
+    for msg in st.session_state.messages:
+        with st.chat_message(msg["role"]):
+            st.write(msg["content"])
 
-        # Persona & Voice Controls
-        st.subheader("Persona & Voice")
-        controller.actor_voice_mode = st.checkbox(
-            "Hear Actor Voices",
-            value=getattr(controller, "actor_voice_mode", False),
-            help="Enable to hear actors speak their lines aloud using text-to-speech.",
-        )
-        render_persona_controls(controller)
+    # Chat input stays fixed at the bottom
+    user_input = st.chat_input("Ask Aira anything...")
 
-        # Senate Actors
-        st.subheader("Senate Actors")
-        render_actor_panel(controller)
+    if user_input:
+        start = time.perf_counter()
 
-        # Memory Controls
-        st.subheader("Memory")
-        render_memory(controller)
+        # Save + display user message
+        st.session_state.messages.append({"role": "user", "content": user_input})
+        with st.chat_message("user"):
+            st.write(user_input)
 
-        # Clear Conversation Button
-        if st.button("Clear Conversation"):
-            controller.context.messages = []
-            controller.emotional_memory.reset()
-            st.rerun()
+        # Generate + display assistant message
+        with st.chat_message("assistant"):
+            with st.spinner("Aira is thinking..."):
+                response = controller.process_message(user_input)
+                end = time.perf_counter()
+                elapsed = end - start
 
-        # Theme & Layout
-        st.subheader("Theme & Layout")
-        render_theme_controls(controller)
+                st.write(response)
+                st.caption(f"Response time: {elapsed:.2f} seconds")
 
-        # Tools Panel
-        st.subheader("Tools")
-        render_tools(controller)
+        # Save assistant message
+        st.session_state.messages.append({"role": "assistant", "content": response})
 
-    # ---------------------------------------------------------
-    # MAIN AREA — Chat + Diagnostics Tabs
-    # ---------------------------------------------------------
-    #tabs = st.tabs(["Chat", "Diagnostics", "Decision Matrix", "Debug Diagnostics"])
-    tabs = st.tabs([
-        "Chat",
-        "Diagnostics",
-        "Decision Matrix",
-        "Debug Diagnostics",
-        "Meta‑Persona Debug",
-        "Emotional Arc"
-    ])
-
-    # Chat Tab
-    with tabs[0]:
-        render_chat(controller)
-
-    # Diagnostics Tab — Observability Surface
-    with tabs[1]:
-        st.title("Diagnostics")
-        st.caption("Deep observability into The Continuum’s internal reasoning, emotions, and decision flow.")
-
-        # 1. Emotional Diagnostics
-        st.header("Emotional Diagnostics")
-        st.write("Smoothed emotions, sentiment, and emotional memory over time.")
-        render_emotional_memory(controller)
-        st.markdown("---")
-
-        # 2. Senate Diagnostics
-        st.header("Senate Diagnostics")
-        st.write("Actor proposals, rankings, and reasoning traces.")
-        render_senate_debate(controller)    # Actor-level reasoning (voices optional)
-        render_reasoning(controller)        # Ranked proposals + actor reasoning
-        render_pipeline(controller)         # Raw → filtered → ranked → winner
-        st.markdown("---")
-
-        # 3. Jury Diagnostics
-        st.header("Jury Diagnostics")
-        st.write("Jury scoring, reasoning, and dissent notes.")
-        # TODO: implement render_jury_diagnostics(controller) in a panel module
-        # render_jury_diagnostics(controller)
-        st.info("Jury diagnostics panel not yet implemented.")
-        st.markdown("---")
-
-        # 4. Turn Timeline (NEW)
-        st.header("Turn Timeline")
-        st.write("Chronological record of each turn: emotion → actor → jury → meta-persona → final output.")
-        render_turn_timeline(controller)
-        st.markdown("---")
-
-        # 5. Continuum Traces
-        st.header("Continuum Traces")
-        st.write("Low-level event logs and internal pipeline traces.")
-        render_traces(controller)
-        st.markdown("---")
-
-        # 6. Flow Diagram
-        st.header("Continuum Flow Diagram")
-        st.write("Visual representation of the full cognitive pipeline.")
-        render_flow(controller)
-
-    with tabs[2]:
-        #render_decision_breakdown(controller)
-        render_decision_matrix(controller)
-    with tabs[3]:
-        render_debug_diagnostics(controller)
-
-    with tabs[4]:
-        render_meta_persona_debug_tab(controller)
-
-    with tabs[5]:
-        render_emotional_arc_panel(controller)
-
-
-# ---------------------------------------------------------
-# Theme Application
-# ---------------------------------------------------------
-def apply_theme(controller):
-    theme = controller.theme_settings
-    css = ""
-
-    # Font size
-    if theme["font_size"] == "small":
-        css += "html, body, [class*='css'] { font-size: 14px; }"
-    elif theme["font_size"] == "large":
-        css += "html, body, [class*='css'] { font-size: 20px; }"
-
-    # Density
-    if theme["density"] == "compact":
-        css += ".block-container { padding-top: 1rem; padding-bottom: 1rem; }"
-    elif theme["density"] == "spacious":
-        css += ".block-container { padding-top: 4rem; padding-bottom: 4rem; }"
-
-    # Accent color
-    css += f"""
-    :root {{
-        --accent-color: {theme['accent_color']};
-    }}
-    .stButton>button {{
-        background-color: var(--accent-color);
-        color: white;
-    }}
-    """
-
-    # Continuum theme mode
-    if theme["mode"] == "Continuum":
-        css += """
-        body {
-            background: linear-gradient(180deg, #0f0f1f, #1a1a2e);
-            color: #e0e0ff;
-        }
-        """
-
-    st.markdown(f"<style>{css}</style>", unsafe_allow_html=True)
-
-
-# ---------------------------------------------------------
-# Entry Point
-# ---------------------------------------------------------
 if __name__ == "__main__":
     main()

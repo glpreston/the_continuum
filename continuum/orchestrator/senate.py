@@ -1,4 +1,6 @@
-#continuum/orchestrator/senate.py
+# continuum/orchestrator/senate.py
+
+import time
 from typing import List, Dict, Any
 from sklearn.feature_extraction.text import TfidfVectorizer
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -8,7 +10,7 @@ from continuum.core.logger import log_info, log_debug, log_error
 
 class Senate:
     """
-    Phase‑4 Senate: gathers proposals from all actors, filters, ranks,
+    Phase‑4 Senate: gathers proposals from selected actors, filters, ranks,
     computes similarity, and returns ranked proposals.
     """
 
@@ -21,7 +23,6 @@ class Senate:
     # COLLECT PROPOSALS (Phase‑4)
     # ---------------------------------------------------------
 
-
     def gather_proposals(
         self,
         context,
@@ -33,34 +34,50 @@ class Senate:
         voiceprint,
         metadata,
         telemetry,
+        actors_to_run,   # 🔴 NEW
     ) -> List[Dict[str, Any]]:
 
         proposals: List[Dict[str, Any]] = []
+        actor_timings: List[Dict[str, Any]] = []
 
+        print("🔥 Senate instrumentation ACTIVE")
         log_error("🔥🔥🔥 ENTERED gather_proposals() 🔥🔥🔥", phase="senate")
-        log_info("[SENATE] Gathering proposals from actors (parallel mode)", phase="senate")
+        log_info("[SENATE] Gathering proposals from actors (parallel routing + parallel execution)", phase="senate")
 
-        # ---------------------------------------------------------
-        # PARALLEL EXECUTION OF ACTORS
-        # ---------------------------------------------------------
-        with ThreadPoolExecutor(max_workers=len(self.actors)) as executor:
+        # Only run selected actors
+        selected_actors = [a for a in self.actors if a.name in actors_to_run]
+
+        log_debug(f"[SENATE] actors_to_run = {actors_to_run}", phase="senate")
+        log_debug(f"[SENATE] Selected actors = {[a.name for a in selected_actors]}", phase="senate")
+
+        with ThreadPoolExecutor(max_workers=len(selected_actors)) as executor:
 
             future_map = {}
 
-            for actor in self.actors:
+            for actor in selected_actors:
 
-                # Skip disabled actors
                 if not controller.actor_settings.get(actor.name, {}).get("enabled", True):
                     log_debug(f"[SENATE] Actor {actor.name} is disabled — skipping", phase="senate")
                     continue
 
-                log_debug(f"[SENATE] Submitting {actor.name} to executor", phase="senate")
+                log_debug(f"[SENATE] Routing + submitting {actor.name} to executor", phase="senate")
 
+                # ⭐ Per‑actor routing
+                routing = controller.router.route(
+                    user_text=message,
+                    actor_name=actor.name,
+                    extra_context={"senate": True},
+                )
+
+                start_time = time.perf_counter()
+
+                # ⭐ Pass routing into actor.propose
                 future = executor.submit(
                     actor.propose,
                     context=context,
                     message=message,
                     controller=controller,
+                    routing=routing,
                     memory=memory,
                     emotional_state=emotional_state,
                     emotional_memory=emotional_memory,
@@ -69,18 +86,16 @@ class Senate:
                     telemetry=telemetry,
                 )
 
-                future_map[future] = actor
+                future_map[future] = (actor, start_time, routing)
 
-            # ---------------------------------------------------------
-            # COLLECT RESULTS AS THEY COMPLETE
-            # ---------------------------------------------------------
             for future in as_completed(future_map):
-                actor = future_map[future]
+                actor, start_time, routing = future_map[future]
+                end_time = time.perf_counter()
+                duration = end_time - start_time
 
                 try:
                     proposal = future.result()
 
-                    # Normalize non-dict proposals into dict form
                     if isinstance(proposal, str):
                         proposal = {
                             "actor": actor.name,
@@ -94,10 +109,6 @@ class Senate:
                             f"Proposal from {actor.name} is not a dict or str: {type(proposal)}"
                         )
 
-                    log_debug(f"[SENATE] Raw proposal from {actor.name}: {proposal}", phase="senate")
-                    log_error(f"[FORENSICS] Senate received proposal type={type(proposal)} value={repr(proposal)}", phase="senate")
-
-                    # Ensure metadata exists
                     metadata_obj = proposal.get("metadata") or {}
                     proposal["metadata"] = metadata_obj
 
@@ -105,22 +116,27 @@ class Senate:
                     weight = controller.actor_settings.get(actor.name, {}).get("weight", 1.0)
                     proposal["confidence"] = proposal.get("confidence", 0) * weight
 
-                    # Reasoning summary
+                    # Optional reasoning summary
                     if hasattr(actor, "summarize_reasoning"):
                         proposal["summary"] = actor.summarize_reasoning(proposal)
                     else:
                         proposal["summary"] = "Summary unavailable."
 
-                    # Optional audio
-                    if getattr(controller, "actor_voice_mode", False):
-                        if hasattr(actor, "speak_proposal"):
-                            proposal_audio = actor.speak_proposal(proposal["content"])
-                            proposal["audio"] = proposal_audio
-
                     proposals.append(proposal)
+
+                    # ⭐ Correct per‑actor model + node
+                    actor_timings.append({
+                        "actor": actor.name,
+                        "duration": duration,
+                        "tokens": len((proposal.get("content") or "")),
+                        "model": routing["model_selection"]["selected_model"],
+                        "node": routing["node_selection"]["selected_node"]["name"],
+                        "error": None,
+                    })
 
                 except Exception as e:
                     log_error(f"🔥🔥🔥 ERROR in actor {actor.name}: {e} 🔥🔥🔥", phase="senate")
+
                     proposals.append({
                         "actor": actor.name,
                         "content": None,
@@ -131,8 +147,24 @@ class Senate:
                         },
                     })
 
+                    actor_timings.append({
+                        "actor": actor.name,
+                        "duration": duration,
+                        "tokens": 0,
+                        "model": routing["model_selection"]["selected_model"],
+                        "node": routing["node_selection"]["selected_node"]["name"],
+                        "error": str(e),
+                    })
+
+        # Ensure last_trace exists before writing to it
+        if not hasattr(controller, "last_trace") or controller.last_trace is None:
+            controller.last_trace = {}
+
+        controller.last_trace["actor_timings"] = actor_timings
+
         log_error(f"🔥🔥🔥 gather_proposals() COMPLETE — {len(proposals)} proposals 🔥🔥🔥", phase="senate")
         return proposals
+
     # ---------------------------------------------------------
     # FILTER PROPOSALS
     # ---------------------------------------------------------
@@ -190,14 +222,13 @@ class Senate:
         voiceprint,
         metadata,
         telemetry,
+        actors_to_run,   # 🔴 NEW
     ) -> List[Dict[str, Any]]:
 
         log_error("🔥🔥🔥 ENTERED Senate.deliberate() 🔥🔥🔥", phase="senate")
         log_info("[SENATE] Starting Senate.deliberate()", phase="senate")
 
-        # ---------------------------------------------------------
-        # 1. Gather proposals (Phase‑4: actors choose their own model)
-        # ---------------------------------------------------------
+        # 1. Gather proposals (parallel routing + parallel execution)
         proposals = self.gather_proposals(
             context=context,
             message=message,
@@ -208,21 +239,18 @@ class Senate:
             voiceprint=voiceprint,
             metadata=metadata,
             telemetry=telemetry,
+            actors_to_run=actors_to_run,   # 🔴 NEW
         )
 
         controller.context.debug_flags["raw_proposals"] = proposals
 
-        # ---------------------------------------------------------
         # 2. Filter proposals
-        # ---------------------------------------------------------
         filtered = self.filter_proposals(proposals)
         controller.context.debug_flags["filtered_proposals"] = filtered
 
         log_error(f"🔥🔥🔥 FILTERED PROPOSALS COUNT = {len(filtered)} 🔥🔥🔥", phase="senate")
 
-        # ---------------------------------------------------------
         # 3. Topic detection + topic-aware confidence shaping
-        # ---------------------------------------------------------
         topic = detect_topic(message)
         topic_weights = TOPIC_ACTOR_WEIGHTS.get(topic, {})
 
@@ -237,14 +265,10 @@ class Senate:
         controller.context.debug_flags["topic"] = topic
         controller.context.debug_flags["topic_weights"] = topic_weights
 
-        # ---------------------------------------------------------
         # 4. Rank proposals
-        # ---------------------------------------------------------
         ranked = self.rank_proposals(filtered)
 
-        # ---------------------------------------------------------
         # 5. Similarity matrix
-        # ---------------------------------------------------------
         similarity = self.compute_similarity_matrix(ranked)
         controller.context.debug_flags["similarity_matrix"] = similarity
 

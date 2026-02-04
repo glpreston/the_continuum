@@ -39,6 +39,7 @@ class DeliberationEngine:
         message: str,
         emotional_state: EmotionalState,
         emotional_memory: EmotionalMemory,
+        actors_to_run: list[str],   # 🔴 NEW: which actors should participate
     ) -> Tuple[List[Dict], Dict]:
 
         log_error("🔥🔥🔥 ENTERED DeliberationEngine.run() 🔥🔥🔥", phase="delib")
@@ -67,6 +68,7 @@ class DeliberationEngine:
             voiceprint=voiceprint,
             metadata=metadata,
             telemetry=telemetry,
+            actors_to_run=actors_to_run,   # 🔴 NEW: pass actor list into Senate
         )
 
         self.last_ranked_proposals = ranked_proposals
