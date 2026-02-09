@@ -115,7 +115,7 @@ def main():
             "Last Error": nh.last_error,
         })
 
-    st.dataframe(pd.DataFrame(node_table), use_container_width=True)
+    st.dataframe(pd.DataFrame(node_table), width='stretch')
 
     # -------------------------------------------------------------------------
     # 3. Node-by-Node Detail View
@@ -199,7 +199,7 @@ def main():
                 "Quarantined Nodes": quarantined_nodes,
             })
 
-        st.dataframe(pd.DataFrame(model_table), use_container_width=True)
+        st.dataframe(pd.DataFrame(model_table), width='stretch')
         
     st.markdown("---")
 
@@ -213,7 +213,7 @@ def main():
         for nh in node_health_rows
     ]).set_index("Node ID")
 
-    st.bar_chart(timeline_df)
+    st.bar_chart(timeline_df, width='stretch')
 
     # -------------------------------------------------------------------------
     # 6. Quarantine Snapshot
@@ -225,7 +225,7 @@ def main():
         for nh in node_health_rows
     ]).set_index("Node ID")
 
-    st.bar_chart(quarantine_df)
+    st.bar_chart(quarantine_df, width='stretch')
 
     st.markdown("---")
 

@@ -1,6 +1,7 @@
 # continuum/audio/meta_speech.py
 
 from continuum.audio.tts_engine import tts_engine
+from continuum.core.logger import log_info, log_debug, log_error
 from continuum.persona.voice_emotion import ACTOR_EMOTION
 from continuum.persona.actor_voice_timbre import ACTOR_TIMBRE
 from continuum.persona.meta_voice import blend_emotion
@@ -135,14 +136,11 @@ def synthesize_meta_voice(
 
     # 1.5) Actor voice personality blend
     actor_voice = _blend_actor_voice_personality(base_weights)
-    print("ACTOR VOICE:", actor_voice)
     
     # 1.6) Dominant actor timbre (for Meta‑Persona / Narrator shaping)
     dominant_actor = max(base_weights, key=base_weights.get)
     timbre = ACTOR_TIMBRE.get(dominant_actor)
-    print("DOMINANT ACTOR:", dominant_actor)
-    print("TIMBRE:", timbre)
-
+    
     # 2) Senate emotional blend
     blended = blend_emotion(base_weights, ACTOR_EMOTION)
 
@@ -257,6 +255,6 @@ def speak_final_answer(controller, final_text: str):
             emotions=result["emotions"],
         )
 
-    print("FINAL MODIFIERS:", result["final_modifiers"])
+        log_debug("FINAL MODIFIERS:", result["final_modifiers"], phase="meta_speech")
 
     return result

@@ -26,7 +26,7 @@ def dummy_actor_config(name):
 
 
 def run_phase4_senate_test():
-    print("\n=== Initializing Senate (Phase‑4) ===")
+# print("\n=== Initializing Senate (Phase‑4) ===")
 
     # Build LLM actors with dummy configs
     architect = Architect(**dummy_actor_config("Architect"))
@@ -52,8 +52,7 @@ def run_phase4_senate_test():
     voiceprint = {"style": "neutral"}
     metadata = {}
     telemetry = {}
-
-    print("\n=== Running Senate Cycle ===")
+# print("\n=== Running Senate Cycle ===")
 
     result = senate.deliberate(
         context=context,
@@ -66,11 +65,9 @@ def run_phase4_senate_test():
         metadata=metadata,
         telemetry=telemetry,
     )
-
-    print("\n=== Senate Output ===")
-    print(result)
-
-    print("\n=== Test Complete ===")
+# print("\n=== Senate Output ===")
+# print(result)
+# print("\n=== Test Complete ===")
 
 
 if __name__ == "__main__":

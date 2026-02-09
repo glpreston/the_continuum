@@ -11,15 +11,16 @@ from continuum.db.models.node_health import NodeHealth
 # NEW: imports for degraded-node refresh
 from continuum.config.model_search import refresh_node
 from continuum.db.mysql_connection import db_pool
+from continuum.core.logger import log_info, log_debug, log_error
 
 
 def handle_degraded_node(node):
     """Trigger a model refresh when a node becomes degraded."""
     try:
-        print(f"[ModelSync] Node {node.host} degraded — triggering model refresh")
+        log_info(f"[ModelSync] Node {node.host} degraded — triggering model refresh", phase="heartbeat")
         refresh_node(node_id=node.id, endpoint=node.host, db_pool=db_pool)
     except Exception as e:
-        print(f"[ModelSync] Failed degraded-node refresh: {e}")
+        log_error(f"[ModelSync] Failed degraded-node refresh: {e}", phase="heartbeat")
 
 
 def heartbeat_loop(interval_seconds: int = 10):

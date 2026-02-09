@@ -60,7 +60,7 @@ class EdgeTTSEngine:
 
         # Log timbre metadata (same behavior as before)
         if timbre:
-            print("TIMBRE PROFILE:", timbre)
+# print("TIMBRE PROFILE:", timbre)
 
         # Run async TTS inside sync API
         return asyncio.run(

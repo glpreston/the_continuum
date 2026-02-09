@@ -6,7 +6,7 @@ Provides a simple interactive loop for testing the orchestrator.
 
 from __future__ import annotations
 import uuid
-
+from continuum.core.logger import log_info, log_debug, log_error
 from continuum.core.context import ContinuumContext
 from continuum.orchestrator.continuum_controller import ContinuumController
 from continuum.actors.base_actor import BaseActor
@@ -27,16 +27,16 @@ def main() -> None:
     controller = build_default_controller()
     context = ContinuumContext(conversation_id=str(uuid.uuid4()))
 
-    print("The Continuum is listening. Type 'exit' to quit.\n")
+    log_info("The Continuum is listening. Type 'exit' to quit.\n", phase="cli")
 
     while True:
         user_input = input("You: ").strip()
         if user_input.lower() in {"exit", "quit"}:
-            print("Goodbye.")
+            log_info("Goodbye.", phase="cli")
             break
 
         result = controller.process_message(user_input)
-        print(f"\nContinuum: {result}\n")
+        log_info(f"Continuum response: {result}", phase="cli")
 
 
 if __name__ == "__main__":

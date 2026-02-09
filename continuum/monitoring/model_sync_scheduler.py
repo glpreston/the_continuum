@@ -2,7 +2,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from continuum.config.model_search import refresh_node
 from continuum.db.sqlalchemy_connection import get_db_session
 from continuum.db.models.nodes import Node
-
+from continuum.core.logger import log_info, log_debug, log_error
 
 scheduler = BackgroundScheduler()
 
@@ -14,7 +14,7 @@ def scheduled_model_refresh():
         try:
             refresh_node(node_id=node.id, endpoint=node.host)
         except Exception as e:
-            print(f"[ModelSync] Failed to refresh node {node.host}: {e}")
+            log_error(f"[ModelSync] Failed to refresh node {node.host}: {e}", phase="model_sync_scheduler")
 
     db.close()
 

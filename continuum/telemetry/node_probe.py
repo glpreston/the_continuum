@@ -5,9 +5,9 @@ import requests
 from requests.exceptions import RequestException
 from continuum.telemetry.probe_result import ProbeResult
 from continuum.config.model_search import refresh_node
+from continuum.core.logger import log_info, log_debug, log_error
+
 # from continuum.db.mysql_connection import db_pool
-
-
 
 class NodeProbe:
     """
@@ -75,9 +75,9 @@ class NodeProbe:
         
     def handle_degraded_node(node):
         try:
-            print(f"[ModelSync] Node {node['hostname']} degraded — triggering refresh")
+            log_info(f"[ModelSync] Node {node['hostname']} degraded — triggering refresh", phase="model_sync")
             #refresh_node(node_id=node["id"], endpoint=node["endpoint"], db_pool=db_pool)
             refresh_node(node_id=node["id"], endpoint=node["endpoint"])
 
         except Exception as e:
-            print(f"[ModelSync] Failed degraded-node refresh: {e}")
+            log_debug(f"[ModelSync] Failed degraded-node refresh: {e}", phase="model_sync")

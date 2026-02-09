@@ -1,3 +1,4 @@
+# continuum/emotion/timeline.py
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import List, Optional
@@ -8,6 +9,13 @@ class ArcPoint:
     emotion: str
     intensity: float
 
+    def to_dict(self):
+        return {
+            "timestamp": self.timestamp.isoformat(),
+            "emotion": self.emotion,
+            "intensity": self.intensity,
+        }
+    
 @dataclass
 class EmotionalArcTimeline:
     window_minutes: int = 30

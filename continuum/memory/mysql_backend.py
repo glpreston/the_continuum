@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 import mysql.connector
 from mysql.connector import Error
+from continuum.core.logger import log_info, log_debug, log_error
 
 
 @dataclass
@@ -40,7 +41,7 @@ class MySQLMemoryBackend:
                 autocommit=True,
             )
         except Error as e:
-            print(f"[MySQLMemoryBackend] Connection error: {e}")
+            log_error(f"[MySQLMemoryBackend] Connection error: {e}", phase="mysql_backend")
             self.conn = None
 
     def ensure_schema(self) -> None:

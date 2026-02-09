@@ -56,7 +56,7 @@ class NodeSelectorV2:
             except Exception:
                 pass
         else:
-            print(msg)
+# print(msg)
 
     # ---------------------------------------------------------
     # Fetch nodes + health + memory

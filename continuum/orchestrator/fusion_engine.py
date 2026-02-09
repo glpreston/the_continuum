@@ -1,7 +1,8 @@
 # continuum/orchestrator/fusion_engine.py
-# Modernized Fusion Engine (Router-aware, model-agnostic)
+# Phase‑5 Fusion Engine (Weighted Hybrid Fusion)
 
 from continuum.core.logger import log_debug, log_error
+import re
 
 
 class FusionEngine:
@@ -9,8 +10,9 @@ class FusionEngine:
     Phase‑5 Fusion Engine.
 
     Responsibilities:
-      - Combine ranked proposals using fusion weights
-      - Remain model-agnostic (Router decides model/node)
+      - Combine proposals using intent‑aware fusion weights
+      - Produce a single coherent fused paragraph
+      - Remain model‑agnostic (Router decides model/node)
       - Accept routing metadata for future adaptive fusion
     """
 
@@ -21,73 +23,69 @@ class FusionEngine:
     # Main fusion entry point
     # ---------------------------------------------------------
     def run(self, fusion_weights, ranked_proposals, controller, routing=None):
-        """
-        Execute the fusion process.
-
-        Args:
-            fusion_weights: dict of actor → weight
-            ranked_proposals: list of proposals from Senate
-            controller: ContinuumController
-            routing: Router decision (intent, model, node, etc.)
-
-        Returns:
-            fused_text: final fused string
-        """
-
         routing = routing or controller.last_routing_decision
 
-        log_error("🔥 FUSION ENGINE START (Router-aware) 🔥", phase="fusion")
+        log_debug("🔥 FUSION ENGINE START (Phase‑5) 🔥", phase="fusion")
 
-        # ---------------------------------------------------------
-        # 1. Extract proposal texts
-        # ---------------------------------------------------------
-        texts = []
+        # -----------------------------------------------------
+        # 1. Extract weighted proposal texts
+        # -----------------------------------------------------
+        weighted_sentences = []
+
         for proposal in ranked_proposals:
             actor = proposal.get("actor", "Unknown")
-            content = proposal.get("content", "")
-            weight = fusion_weights.get(actor, 1.0)
+            content = proposal.get("content", "") or ""
+            weight = float(fusion_weights.get(actor, 0.0))
+
+            # Skip actors with zero weight (e.g., Greeter on big_idea)
+            if weight <= 0.0:
+                continue
 
             log_debug(
-                f"[FUSION] Actor={actor} Weight={weight} ContentPreview={content[:60]}",
-                phase="fusion"
+                f"[FUSION] Actor={actor} Weight={weight:.3f} Preview={content[:60]}",
+                phase="fusion",
             )
 
-            texts.append((actor, content, weight))
+            # Split into sentences
+            sentences = self._split_sentences(content)
 
-        # ---------------------------------------------------------
-        # 2. Weighted blending (simple but effective)
-        # ---------------------------------------------------------
-        fused = self._weighted_blend(texts)
+            for s in sentences:
+                weighted_sentences.append((s, weight, actor))
 
-        # ---------------------------------------------------------
-        # 3. Attach routing metadata for downstream layers
-        # ---------------------------------------------------------
-        log_debug(
-            f"[FUSION] Routing metadata passed through: {routing}",
-            phase="fusion"
-        )
+        if not weighted_sentences:
+            log_error("[FUSION] No weighted sentences available", phase="fusion")
+            return ""
 
-        log_error("🔥 FUSION ENGINE COMPLETE 🔥", phase="fusion")
-        return fused
+        # -----------------------------------------------------
+        # 2. Normalize weights
+        # -----------------------------------------------------
+        total_weight = sum(w for _, w, _ in weighted_sentences) or 1.0
+        normalized = [(s, w / total_weight, a) for (s, w, a) in weighted_sentences]
+
+        # -----------------------------------------------------
+        # 3. Select top‑weighted sentences
+        # -----------------------------------------------------
+        normalized.sort(key=lambda x: x[1], reverse=True)
+
+        # Keep top N sentences (Phase‑5 heuristic)
+        TOP_N = 5
+        selected = normalized[:TOP_N]
+
+        # -----------------------------------------------------
+        # 4. Merge into a single coherent paragraph
+        # -----------------------------------------------------
+        fused_text = " ".join(s for (s, _, _) in selected).strip()
+
+        log_debug(f"[FUSION] Fused text (pre‑rewrite): {fused_text}", phase="fusion")
+        log_debug(f"[FUSION] Routing metadata: {routing}", phase="fusion")
+
+        log_debug("🔥 FUSION ENGINE COMPLETE 🔥", phase="fusion")
+        return fused_text
 
     # ---------------------------------------------------------
-    # Weighted blending algorithm
+    # Sentence splitter (simple but effective)
     # ---------------------------------------------------------
-    def _weighted_blend(self, texts):
-        """
-        Simple weighted blending:
-          - Multiply each proposal by its weight
-          - Concatenate in descending weight order
-
-        This preserves your Phase‑4 behavior while allowing
-        future upgrades (intent-aware fusion, model-aware fusion, etc.)
-        """
-
-        # Sort by weight descending
-        texts_sorted = sorted(texts, key=lambda x: x[2], reverse=True)
-
-        blended = []
-        for actor, content, weight in texts_sorted:
-            blended.append(content)
-
-        return "\n".join(blended)
+    def _split_sentences(self, text: str):
+        text = text.replace("\n", " ").strip()
+        parts = re.split(r"(?<=[.!?])\s+", text)
+        return [p.strip() for p in parts if p.strip()]

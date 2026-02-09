@@ -15,6 +15,7 @@ from typing import Any, Dict, List, Optional
 
 from .types import Message
 from continuum.memory.continuum_memory import ContinuumMemory
+from continuum.core.logger import log_info, log_debug, log_error
 
 @dataclass
 class ContinuumContext:
@@ -36,31 +37,24 @@ class ContinuumContext:
     def add_user_message(self, content: str) -> None:
         self.add("user", content)
 
-    #def add_assistant_message(self, content: str) -> None:
-        #self.add("assistant", content)
-        #print("ADD_ASSISTANT_MESSAGE CALLED:", content[:50])
-
     def add_assistant_message(self, content: str) -> None:
         self.add("assistant", content)
 
-        print("\n================ ASSISTANT MESSAGE DEBUG ================")
-        print("CONTENT PREVIEW:", repr(content[:200]))
-        print("TYPE:", type(content))
+        log_debug("ASSISTANT MESSAGE DEBUG")
+        log_debug("CONTENT PREVIEW:", repr(content[:200]))
+        log_debug("TYPE:", type(content))
 
         # Who called this function?
         stack = traceback.extract_stack(limit=5)
         print("CALL STACK:")
         for frame in stack:
-            print(f"  - {frame.filename}:{frame.lineno} in {frame.name}")
+         print(f"  - {frame.filename}:{frame.lineno} in {frame.name}")
 
         # Which module invoked it?
         caller = inspect.stack()[1]
-        print("CALLER MODULE:", caller.frame.f_globals.get("__name__"))
+        log_debug("CALLER MODULE:", caller.frame.f_globals.get("__name__"))
 
-        print("=========================================================\n")
-
-
-
+       
     def last_user_message(self) -> Optional[Message]:
         for msg in reversed(self.messages):
             if msg.role == "user":

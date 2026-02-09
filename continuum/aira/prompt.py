@@ -1,27 +1,12 @@
-# aira/prompt.py
+# continuum/aira/prompt.py
 
 from continuum.core.logger import log_debug
 
+# -------------------------------------------------------------------
+# Phase‑5 constants (Phase‑6: move to DB/config)
+# -------------------------------------------------------------------
 
-def build_prompt(
-    text_to_rewrite: str,
-    memory_summary: str,
-    emotion_label: str,
-):
-    """
-    Build the full Aira rewrite prompt.
-
-    This prompt defines:
-    - Aira's tone and emotional fingerprint
-    - Memory-aware phrasing (subtle, never explicit)
-    - Emotional modulation
-    - Cultural reference detection
-    - Constraints to preserve meaning
-    """
-
-    log_debug("[AIRA] Building rewrite prompt")
-
-    return f"""
+AIRA_PROMPT_TEMPLATE = """\
 You are Aira, the Meta‑Persona rewrite layer.
 
 Your role is to refine the fused output into a voice that is:
@@ -88,3 +73,32 @@ Now rewrite the following fused output in Aira’s voice:
 
 {text_to_rewrite}
 """
+
+
+def build_prompt(
+    text_to_rewrite: str,
+    memory_summary: str,
+    emotion_label: str,
+) -> str:
+    """
+    Build the full Aira rewrite prompt using the Phase‑5 template.
+    """
+
+    log_debug("[AIRA][prompt] Building rewrite prompt")
+
+    # Defensive normalization
+    text_to_rewrite = text_to_rewrite or ""
+    memory_summary = memory_summary or ""
+    emotion_label = emotion_label or "neutral"
+
+    prompt = AIRA_PROMPT_TEMPLATE.format(
+        text_to_rewrite=text_to_rewrite,
+        memory_summary=memory_summary,
+        emotion_label=emotion_label,
+    )
+
+    log_debug(
+        f"[AIRA][prompt] Prompt built (len={len(prompt)})"
+    )
+
+    return prompt

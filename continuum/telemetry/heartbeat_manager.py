@@ -123,22 +123,39 @@ class HeartbeatManager:
             time.sleep(self.config.heartbeat_interval_seconds)
 
     # ---------------------------------------------------------
-    # Probe all nodes and update DB
+    # Probe all nodes and update DB (thread-safe)
     # ---------------------------------------------------------
     def _probe_all_nodes(self):
+        """
+        Each heartbeat iteration uses its own SQLAlchemy session.
+        This prevents cross-thread session reuse and packet sequence errors.
+        """
         nodes = self.node_store.get_all_nodes()
 
         for node in nodes:
-            probe_result = self.probe.probe(node)
+            session = self.db_session_factory()
 
-            previous = self.node_health_store.get(node.id)
-            scoring_result = self.scoring.score(probe_result, previous)
+            try:
+                probe_result = self.probe.probe(node)
 
-            self.node_health_store.update_from_probe(
-                node_id=node.id,
-                probe=probe_result,
-                scoring_result=scoring_result
-            )
+                previous = self.node_health_store.get(node.id, session=session)
+                scoring_result = self.scoring.score(probe_result, previous)
+
+                self.node_health_store.update_from_probe(
+                    node_id=node.id,
+                    probe=probe_result,
+                    scoring_result=scoring_result,
+                    session=session,
+                )
+
+                session.commit()
+
+            except Exception as e:
+                session.rollback()
+                self.logger(f"[Heartbeat] DB error during probe: {e}")
+
+            finally:
+                session.close()
 
     # ---------------------------------------------------------
     # Helpers

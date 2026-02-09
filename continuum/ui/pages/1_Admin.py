@@ -58,7 +58,7 @@ def main():
                 "Last Seen": n.last_seen,
             })
 
-        st.dataframe(pd.DataFrame(node_table), use_container_width=True)
+        st.dataframe(pd.DataFrame(node_table), width='stretch')
 
     st.markdown("---")
 
@@ -84,7 +84,7 @@ def main():
                 "Last Heartbeat": nh.last_heartbeat_at,
             })
 
-        st.dataframe(pd.DataFrame(health_table), use_container_width=True)
+        st.dataframe(pd.DataFrame(health_table), width='stretch')
     else:
         st.info("No health data yet.")
 
@@ -116,7 +116,7 @@ def main():
                 "Vision Model": lm.is_vision,
             })
 
-        st.dataframe(pd.DataFrame(model_table), use_container_width=True)
+        st.dataframe(pd.DataFrame(model_table), width='stretch')
 
     st.markdown("---")
 

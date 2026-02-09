@@ -1,0 +1,532 @@
+# continuum/aira/meta_rewrite.py
+
+import datetime
+from typing import Optional
+from continuum.core.logger import log_debug, log_error
+from continuum.aira.rewrite_loop import rewrite_loop
+from continuum.aira.polish import micro_polish
+from continuum.aira.safety import validate_rewrite
+from continuum.persona.style_rewrite import apply_style
+from continuum.emotion.timeline import ArcPoint
+
+# -------------------------------------------------------------------
+# Phase‑5 Deprecation Notice
+# This module is retained ONLY for UI tools and debugging.
+# The runtime pipeline now uses MetaPersona.render().
+# -------------------------------------------------------------------
+
+# -------------------------------------------------------------------
+# Phase‑5 constants (Phase‑6: move to DB/config)
+# -------------------------------------------------------------------
+
+DEFAULT_EMOTION_LABEL = "neutral"
+DEFAULT_MAX_REWRITE_DEPTH = 3
+DEFAULT_BASE_TEMPERATURE = 0.7
+DEFAULT_MAX_TOKENS = 1024
+
+AIRA_LITE_MODEL = "qwen2.5:0.5b"
+AIRA_LITE_MAX_TOKENS = 128
+AIRA_LITE_TEMPERATURE = 0.4
+
+MICRO_POLISH_TEMPERATURE = 0.3
+
+FALLBACK_NO_PROPOSAL_MESSAGE = (
+    "The Continuum encountered an error: no proposals were available for rewrite."
+)
+
+AIRA_TONE_GREETER = (
+    "Rewrite this into Aira's warm, friendly, conversational voice. "
+    "Keep it brief, natural, and lightly expressive. "
+    "Avoid structure, analysis, or formality.\n\n"
+)
+
+AIRA_TONE_GREETING = (
+    "Rewrite this in a warm, brief, friendly tone. "
+    "Keep it light and natural.\n\n"
+)
+
+AIRA_TONE_LIGHT_TASK = (
+    "Rewrite this in a concise, helpful tone with a gentle conversational touch.\n\n"
+)
+
+AIRA_LITE_TONE_PREFIX = (
+    "Rewrite this in Aira_Lite's warm, brief, friendly voice. "
+    "Keep it natural, short, and lightly expressive.\n\n"
+)
+
+
+# -------------------------------------------------------------------
+# Helpers
+# -------------------------------------------------------------------
+
+def _extract_base_text(core_text: Optional[str], proposal: Optional[dict]) -> Optional[str]:
+    """
+    Determine the base text to rewrite from core_text or proposal.
+    """
+    if isinstance(core_text, str) and core_text.strip():
+        return core_text.strip()
+
+    if isinstance(proposal, dict):
+        candidate = (
+            proposal.get("content")
+            or proposal.get("text")
+            or proposal.get("message")
+        )
+        if isinstance(candidate, str) and candidate.strip():
+            return candidate.strip()
+
+    return None
+
+
+def _build_endpoint_from_routing(routing: dict) -> Optional[str]:
+    """
+    Build the LLM endpoint URL from routing information.
+    Expects routing["node_selection"]["selected_node"] with host/port.
+    """
+    node_sel = routing.get("node_selection", {})
+    node = node_sel.get("selected_node")
+    if not node:
+        return None
+
+    host = node.get("host")
+    port = node.get("port")
+
+    if not host:
+        return None
+
+    if host.startswith("http://") or host.startswith("https://"):
+        base = host.rstrip("/")
+        # Only append port if not already present
+        if port and ":" not in base.split("//", 1)[1]:
+            base = f"{base}:{port}"
+    else:
+        base = f"http://{host}"
+        if port:
+            base = f"{base}:{port}"
+
+    return f"{base}/api/generate"
+
+
+def _get_routing(controller, routing: Optional[dict]) -> Optional[dict]:
+    """
+    Resolve routing decision:
+    - Prefer explicit routing argument
+    - Fallback to controller.last_routing_decision
+    """
+    if routing is not None:
+        return routing
+
+    return getattr(controller, "last_routing_decision", None)
+
+
+def _get_model_from_routing(routing: dict) -> Optional[str]:
+    """
+    Extract selected model from routing["model_selection"]["selected_model"].
+    """
+    model_sel = routing.get("model_selection", {})
+    selected_model = model_sel.get("selected_model")
+    if not selected_model:
+        return None
+    return selected_model
+
+
+def _build_tone_prefix(
+    persona_name: Optional[str],
+    actor_name: Optional[str],
+    intent_name: Optional[str],
+) -> str:
+    """
+    Build tone prefix based on persona, actor, and intent.
+    """
+    if persona_name == "Aira_Lite":
+        # Aira_Lite handled separately in _aira_lite_rewrite
+        return ""
+
+    if actor_name == "Greeter":
+        return AIRA_TONE_GREETER
+
+    if intent_name in ("greeting", "chitchat"):
+        return AIRA_TONE_GREETING
+
+    if intent_name == "light_task":
+        return AIRA_TONE_LIGHT_TASK
+
+    return ""
+
+
+# -------------------------------------------------------------------
+# Core Meta‑Rewrite Engine
+# -------------------------------------------------------------------
+
+def meta_rewrite_llm(
+    controller,
+    core_text: str | None = None,
+    proposal: dict | None = None,
+    emotion_label: str | None = None,
+    enable_micro_polish: bool = True,
+    routing: dict | None = None,
+    **kwargs,
+) -> str:
+    """
+    Aira Meta‑Persona rewrite hook (Phase‑5, Router-aware).
+
+    Pipeline:
+    - Extract base text from core_text/proposal
+    - Use SAME model + node as main generation (via Router)
+    - Build memory summary
+    - Run multi‑pass rewrite loop
+    - Optionally run micro‑polish
+    - Return final Aira‑voiced text
+    """
+
+    intent_name = kwargs.get("intent_name")
+    actor_name = kwargs.get("actor_name")
+    persona_name = kwargs.get("persona_name", "Aira")
+
+    log_debug(
+        "[AIRA][meta_rewrite] meta_rewrite_llm invoked "
+        f"(actor={actor_name}, intent={intent_name}, persona={persona_name})"
+    )
+
+    # -------------------------------------------------------------
+    # Aira-Lite Fast Rewrite Mode
+    # -------------------------------------------------------------
+    if persona_name == "Aira_Lite":
+        return _aira_lite_rewrite(
+            controller=controller,
+            core_text=core_text,
+            proposal=proposal,
+            emotion_label=emotion_label,
+            routing=routing,
+            actor_name=actor_name,
+        )
+
+    base_text = _extract_base_text(core_text, proposal)
+    if not base_text:
+        log_error("[AIRA][meta_rewrite] No valid core_text or proposal content")
+        return FALLBACK_NO_PROPOSAL_MESSAGE
+
+    if not emotion_label:
+        emotion_label = DEFAULT_EMOTION_LABEL
+
+    # Routing: use same model + node as main generation
+    routing = _get_routing(controller, routing)
+    if not routing:
+        log_error(
+            "[AIRA][meta_rewrite] No routing decision available for rewrite; "
+            "falling back to base_text"
+        )
+        return base_text
+
+    model = _get_model_from_routing(routing)
+    if not model:
+        log_error(
+            "[AIRA][meta_rewrite] Routing missing selected_model; "
+            "falling back to base_text"
+        )
+        return base_text
+
+    endpoint = _build_endpoint_from_routing(routing)
+    if not endpoint:
+        log_error(
+            "[AIRA][meta_rewrite] Routing missing host/port; "
+            "falling back to base_text"
+        )
+        return base_text
+
+    # Controller settings
+    llm_client = controller.llm_client
+    base_temperature = getattr(controller, "temperature", DEFAULT_BASE_TEMPERATURE)
+    max_tokens = getattr(controller, "max_tokens", DEFAULT_MAX_TOKENS)
+    max_rewrite_depth = getattr(
+        controller, "max_rewrite_depth", DEFAULT_MAX_REWRITE_DEPTH
+    )
+
+    # Memory summary for Aira's prompt
+    try:
+        if hasattr(controller, "context") and hasattr(
+            controller.context, "get_memory_summary"
+        ):
+            memory_summary = controller.context.get_memory_summary()
+        else:
+            memory_summary = ""
+    except Exception as e:
+        log_error(f"[AIRA][meta_rewrite] Error getting memory summary: {e}")
+        memory_summary = ""
+
+    log_debug(
+        "[AIRA][meta_rewrite] Starting rewrite "
+        f"(model={model}, endpoint={endpoint}, "
+        f"emotion_label={emotion_label}, max_rewrite_depth={max_rewrite_depth})"
+    )
+
+    # -------------------------------------------------------------
+    # Tone Modulation Layer (Greeter + Intent-aware)
+    # -------------------------------------------------------------
+    tone_prefix = _build_tone_prefix(
+        persona_name=persona_name,
+        actor_name=actor_name,
+        intent_name=intent_name,
+    )
+    base_text_with_tone = tone_prefix + base_text
+
+    log_debug(
+        "[AIRA][meta_rewrite] Tone prefix applied "
+        f"(len_prefix={len(tone_prefix)}, original_len={len(base_text)})"
+    )
+
+    # -----------------------------
+    # Multi‑pass rewrite loop
+    # -----------------------------
+    try:
+        rewritten = rewrite_loop(
+            llm_client=llm_client,
+            model=model,
+            base_text=base_text_with_tone,
+            memory_summary=memory_summary,
+            emotion_label=emotion_label,
+            base_temperature=base_temperature,
+            max_tokens=max_tokens,
+            max_rewrite_depth=max_rewrite_depth,
+        )
+    except Exception as e:
+        log_error(f"[AIRA][meta_rewrite] Error in rewrite_loop: {e}")
+        return base_text
+
+    if not validate_rewrite(base_text_with_tone, rewritten):
+        log_error("[AIRA][meta_rewrite] Rewrite validation failed, falling back to base_text")
+        return base_text
+
+    final_text = rewritten
+
+    # -----------------------------
+    # Optional micro‑polish pass
+    # -----------------------------
+    if enable_micro_polish:
+        try:
+            polished = micro_polish(
+                llm_client=llm_client,
+                model=model,
+                text=final_text,
+                temperature=MICRO_POLISH_TEMPERATURE,
+                max_tokens=max_tokens,
+            )
+
+            if validate_rewrite(final_text, polished):
+                final_text = polished
+            else:
+                log_error(
+                    "[AIRA][meta_rewrite] Micro‑polish validation failed, "
+                    "keeping pre‑polish text"
+                )
+
+        except Exception as e:
+            log_error(f"[AIRA][meta_rewrite] Error during micro-polish: {e}")
+
+    log_debug(
+        "[AIRA][meta_rewrite] meta_rewrite_llm complete "
+        f"(original_len={len(base_text)}, final_len={len(final_text)})"
+    )
+
+    return final_text
+
+
+# -------------------------------------------------------------------
+# Aira‑Lite Fast Path
+# -------------------------------------------------------------------
+
+def _aira_lite_rewrite(
+    controller,
+    core_text: str | None,
+    proposal: dict | None,
+    emotion_label: str | None,
+    routing: dict | None,
+    actor_name: str | None,
+):
+    """
+    Ultra-fast rewrite path for greetings/chitchat using Aira_Lite persona.
+    - Uses a tiny model (qwen2.5:0.5b)
+    - Single-pass rewrite (no rewrite_loop)
+    - No micro-polish
+    - Still applies tone modulation
+    """
+
+    base_text = _extract_base_text(core_text, proposal)
+    if not base_text:
+        log_debug("[AIRA_LITE][meta_rewrite] No base_text; returning default greeting")
+        return "Hello!"
+
+    base_text_with_tone = AIRA_LITE_TONE_PREFIX + base_text
+
+    llm_client = controller.llm_client
+
+    try:
+        rewritten = llm_client.generate(
+            model=AIRA_LITE_MODEL,
+            prompt=base_text_with_tone,
+            max_tokens=AIRA_LITE_MAX_TOKENS,
+            temperature=AIRA_LITE_TEMPERATURE,
+        )
+    except Exception as e:
+        log_error(f"[AIRA_LITE][meta_rewrite] Error during rewrite: {e}")
+        return base_text
+
+    # Normalize rewritten output
+    if isinstance(rewritten, dict):
+        rewritten = (
+            rewritten.get("response")
+            or rewritten.get("content")
+            or str(rewritten)
+        )
+
+    if not isinstance(rewritten, str):
+        rewritten = str(rewritten)
+
+    rewritten = rewritten.strip()
+    if not rewritten:
+        log_error(
+            "[AIRA_LITE][meta_rewrite] Empty rewrite output, "
+            "falling back to base_text"
+        )
+        return base_text
+
+    log_debug(
+        "[AIRA_LITE][meta_rewrite] Rewrite complete "
+        f"(actor={actor_name}, final_len={len(rewritten)})"
+    )
+
+    return rewritten
+
+
+# -------------------------------------------------------------------
+# Emotional Rewrite Wrapper (Phase‑5D Integration)
+# -------------------------------------------------------------------
+
+def emotional_rewrite(
+    controller,
+    core_text: str | None = None,
+    user_text: str | None = None,
+    user_emotion: str | None = None,
+    style_weights: dict | None = None,
+    proposal: dict | None = None,
+    enable_micro_polish: bool = True,
+    routing: dict | None = None,
+    **kwargs,
+):
+    """
+    Full emotional rewrite pipeline:
+    - Accepts legacy core_text API
+    - Maps core_text → user_text
+    - Updates emotional state
+    - Updates timeline
+    - Updates memory
+    - Runs meta_rewrite_llm
+    - Applies persona style
+    - Applies emotional modulation
+    """
+
+    # Backwards compatibility: controller still passes core_text
+    if user_text is None:
+        user_text = core_text
+
+    if user_emotion is None:
+        user_emotion = DEFAULT_EMOTION_LABEL
+
+    if style_weights is None:
+        style_weights = {}
+
+    log_debug(
+        "[AIRA][emotional_rewrite] Invoked "
+        f"(user_emotion={user_emotion}, style_weights_keys={list(style_weights.keys())})"
+    )
+
+    # 1. Update emotional state based on user emotion
+    try:
+        controller.emotion_transition.apply_user_emotion(user_emotion)
+    except Exception as e:
+        log_error(f"[AIRA][emotional_rewrite] Error applying user emotion: {e}")
+
+    # 2. Update memory (defensive: ensure last_point is usable)
+    last_point = controller.emotion_timeline.get_current()
+
+    from continuum.emotion.timeline import ArcPoint
+
+    # Convert ArcPoint → dict
+    if isinstance(last_point, ArcPoint):
+        try:
+            last_point = last_point.to_dict()
+        except Exception as e:
+            log_error(f"[AIRA][emotional_rewrite] Failed to convert ArcPoint to dict: {e}")
+            last_point = None
+
+    # Convert ArcPoint dict → EI‑2.0 EmotionalEvent dict
+    if isinstance(last_point, dict) and "emotion" in last_point and "intensity" in last_point:
+        try:
+            last_point = {
+                "timestamp": last_point.get("timestamp"),
+                "raw_state": { last_point["emotion"]: float(last_point["intensity"]) },
+                "dominant_emotion": last_point["emotion"],
+                "metadata": {}
+            }
+        except Exception as e:
+            log_error(f"[AIRA][emotional_rewrite] Failed to convert ArcPoint dict to EI‑2.0 event: {e}")
+            last_point = None
+
+    # Now update emotional memory
+    if isinstance(last_point, dict):
+        try:
+            controller.emotion_memory.add_event(
+                raw_state=last_point["raw_state"],
+                dominant_emotion=last_point["dominant_emotion"],
+                timestamp=datetime.datetime.fromisoformat(last_point["timestamp"]) 
+                    if last_point.get("timestamp") else None,
+                metadata=last_point.get("metadata", {})
+            )
+            controller.emotion_memory.apply_memory_influence()
+        except Exception as e:
+            log_error(f"[AIRA][emotional_rewrite] Error updating emotional memory: {e}")
+    elif last_point is not None:
+        log_error(
+            "[AIRA][emotional_rewrite] Invalid last_point type in emotion_timeline: "
+            f"{type(last_point)} — skipping memory update"
+        )
+
+    # 3. Run the core rewrite engine
+    if "emotion_label" in kwargs:
+        log_debug(
+            "[AIRA][emotional_rewrite] Discarding external emotion_label in kwargs "
+            "in favor of controller.emotion_state.current_emotion"
+        )
+        kwargs.pop("emotion_label")
+
+    log_debug(
+        "[AIRA][emotional_rewrite] Calling meta_rewrite_llm "
+        f"(current_emotion={getattr(controller.emotion_state, 'current_emotion', None)})"
+    )
+
+    rewritten = meta_rewrite_llm(
+        controller=controller,
+        core_text=user_text,
+        proposal=proposal,
+        emotion_label=controller.emotion_state.current_emotion,
+        enable_micro_polish=enable_micro_polish,
+        routing=routing,
+        **kwargs,
+    )
+
+    # 4. Apply persona style
+    styled = apply_style(rewritten, style_weights)
+
+    # 5. Apply emotional modulation
+    try:
+        final = controller.emotion_modulation.modulate(styled, style_weights)
+    except Exception as e:
+        log_error(f"[AIRA][emotional_rewrite] Error during emotional modulation: {e}")
+        final = styled
+
+    log_debug(
+        "[AIRA][emotional_rewrite] Complete "
+        f"(final_len={len(final)})"
+    )
+
+    return final

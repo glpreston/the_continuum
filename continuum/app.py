@@ -1,5 +1,5 @@
 # continuum/app.py
-
+from continuum.core.logger import log_info, log_debug, log_error
 from fastapi import FastAPI
 
 # Memory + Controller
@@ -19,7 +19,7 @@ from continuum.api.nodes import router as nodes_router
 from continuum.monitoring.model_sync_scheduler import start_scheduler
 
 import sys
-print("Loaded modules:", list(sys.modules.keys()))
+log_debug("Loaded modules:", list(sys.modules.keys()), phase="app_initialization")
 
 
 # ---------------------------------------------------------
